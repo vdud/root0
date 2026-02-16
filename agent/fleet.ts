@@ -2,6 +2,11 @@ import express from 'express';
 import cors from 'cors';
 import { spawn, type ChildProcess } from 'child_process';
 import * as path from 'path';
+import postgres from 'postgres';
+import * as dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+
+dotenv.config();
 
 const app = express();
 app.use(cors());
@@ -9,86 +14,79 @@ app.use(express.json());
 
 const PORT = 3000;
 
+// Database Connection
+const connectionString = process.env.DATABASE_URL;
+let sql: postgres.Sql | null = null;
+
+if (!connectionString) {
+	console.error('DATABASE_URL is not set. Persistence will be disabled.');
+} else {
+	sql = postgres(connectionString);
+}
+
 interface AgentProcess {
 	process: ChildProcess;
 	id: string;
 	name: string;
 	startTime: number;
-	owner?: string;
+	owner: string;
 }
 
-// Store active agents
+// Store active agents in memory (for process management)
 const agents = new Map<string, AgentProcess>();
 
 // Helper to clean up dead processes
-const cleanup = (id: string) => {
+const cleanup = async (id: string, updateDB = true) => {
 	if (agents.has(id)) {
-		const agent = agents.get(id)!;
-		console.log(`[Fleet] Agent ${agent.name} (${id}) exited.`);
 		agents.delete(id);
+	}
+	if (updateDB && sql) {
+		try {
+			await sql`UPDATE agents SET status = 'stopped' WHERE id = ${id}`;
+		} catch (e) {
+			console.error(`[Fleet] Failed to update DB status for ${id}:`, e);
+		}
 	}
 };
 
-app.get('/agents', (req, res) => {
-	const list = Array.from(agents.values()).map((a) => ({
-		id: a.id,
-		name: a.name,
-		uptime: Date.now() - a.startTime,
-		owner: a.owner
-	}));
-	res.json(list);
-});
-
-app.post('/agent/start', (req, res) => {
-	const { id, name, purpose, behaviour, owner } = req.body;
-
-	console.log(`[Fleet] Starting agent ${name} (Owner: ${owner || 'None'})`);
-
-	if (!id || !name) {
-		return res.status(400).json({ error: 'Missing id or name' });
-	}
-
-	if (!owner) {
-		return res.status(400).json({ error: 'Missing owner wallet address' });
-	}
-
+const startAgentProcess = async (
+	id: string,
+	name: string,
+	purpose: string,
+	behaviour: string,
+	owner: string,
+	updateDB = true
+) => {
 	if (agents.has(id)) {
-		return res.status(409).json({ error: 'Agent already running' });
+		console.log(`[Fleet] Agent ${name} (${id}) is already running.`);
+		return;
 	}
 
-	// Spawn the agent process
-	// We use 'npx tsx agent/main.ts'
 	const env = {
 		...process.env,
 		AGENT_ID: id,
 		AGENT_NAME: name,
 		AGENT_PURPOSE: purpose || 'Explorer',
 		AGENT_BEHAVIOUR: behaviour || 'Neutral',
-		AGENT_OWNER: owner || '' // Pass owner wallet address
+		AGENT_OWNER: owner,
+		NEXT_PUBLIC_PARTYKIT_HOST: process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'localhost:1999'
 	};
 
-	const partyHost = env.NEXT_PUBLIC_PARTYKIT_HOST || 'antigravity-server.vdud.partykit.dev';
-	console.log(`[Fleet] Starting agent ${name} (Owner: ${owner || 'None'})`);
-	console.log(`[Fleet] Target PartyKit Host: ${partyHost}`);
-
-	// Use direct path to tsx to avoid npx wrapper signal issues
 	const tsxPath = path.join(process.cwd(), 'node_modules', '.bin', 'tsx');
 
 	const child = spawn(tsxPath, ['agent/main.ts'], {
-		stdio: 'inherit', // Pipe logs to main container logs
+		stdio: 'inherit',
 		env,
 		cwd: process.cwd()
-		// detached: false // Ensure it's attached so signals propagate if needed, but defaults are usually fine
 	});
 
 	child.on('exit', (code, signal) => {
-		console.log(`[Fleet] Agent ${name} exited with code ${code} and signal ${signal}`);
-		cleanup(id);
+		cleanup(id, true);
 	});
 
 	child.on('error', (err) => {
 		console.error(`[Fleet] Failed to start agent ${name}:`, err);
-		cleanup(id);
+		cleanup(id, true);
 	});
 
 	agents.set(id, {
@@ -99,42 +97,122 @@ app.post('/agent/start', (req, res) => {
 		owner
 	});
 
-	res.json({ success: true, pid: child.pid });
+	if (updateDB && sql) {
+		try {
+			// Upsert agent
+			await sql`
+				INSERT INTO agents (id, name, purpose, behaviour, owner, status, last_seen)
+				VALUES (${id}, ${name}, ${purpose}, ${behaviour}, ${owner}, 'running', NOW())
+				ON CONFLICT (id) DO UPDATE SET
+					status = 'running',
+					last_seen = NOW(),
+					name = ${name},
+					purpose = ${purpose},
+					behaviour = ${behaviour},
+					owner = ${owner}
+			`;
+		} catch (e) {
+			console.error(`[Fleet] Failed to save agent ${id} to DB:`, e);
+		}
+	}
+};
+
+// Restore agents on startup
+const restoreAgents = async () => {
+	if (!sql) return;
+	try {
+		console.log('[Fleet] Checking for agents to restore...');
+		const agentsToRestore = await sql`SELECT * FROM agents WHERE status = 'running'`;
+		console.log(`[Fleet] Found ${agentsToRestore.length} agents to restore.`);
+
+		for (const agent of agentsToRestore) {
+			console.log(`[Fleet] Restoring agent: ${agent.name} (${agent.id})`);
+			await startAgentProcess(
+				agent.id,
+				agent.name,
+				agent.purpose,
+				agent.behaviour,
+				agent.owner,
+				false // Don't update DB, we are just restoring process
+			);
+		}
+	} catch (e) {
+		console.error('[Fleet] Failed to restore agents:', e);
+	}
+};
+
+app.get('/agents', async (req, res) => {
+	// Return list from DB if available, else memory
+	if (sql) {
+		try {
+			const dbAgents = await sql`SELECT * FROM agents`;
+			const list = dbAgents.map((a: any) => ({
+				id: a.id,
+				name: a.name,
+				uptime: agents.has(a.id) ? Date.now() - agents.get(a.id)!.startTime : 0,
+				owner: a.owner,
+				status: agents.has(a.id) ? 'running' : 'stopped' // Sync source of truth
+			}));
+			res.json(list);
+			return;
+		} catch (e) {
+			console.error('[Fleet] Failed to fetch agents from DB:', e);
+		}
+	}
+
+	// Fallback to memory
+	const list = Array.from(agents.values()).map((a) => ({
+		id: a.id,
+		name: a.name,
+		uptime: Date.now() - a.startTime,
+		owner: a.owner,
+		status: 'running'
+	}));
+	res.json(list);
 });
 
-app.post('/agent/stop', (req, res) => {
+app.post('/agent/start', async (req, res) => {
+	const { id, name, purpose, behaviour, owner } = req.body;
+
+	if (!id || !name || !owner) {
+		return res.status(400).json({ error: 'Missing id, name, or owner' });
+	}
+
+	if (agents.has(id)) {
+		return res.status(409).json({ error: 'Agent already running' });
+	}
+
+	await startAgentProcess(id, name, purpose, behaviour, owner, true);
+
+	res.json({ success: true, pid: agents.get(id)?.process.pid });
+});
+
+app.post('/agent/stop', async (req, res) => {
 	const { id } = req.body;
 
 	if (!agents.has(id)) {
-		return res.status(404).json({ error: 'Agent not found' });
+		// Even if not in memory, ensure DB says stopped
+		if (sql) {
+			await sql`UPDATE agents SET status = 'stopped' WHERE id = ${id}`;
+		}
+		return res.json({ success: true, message: 'Agent was not running, but status updated.' });
 	}
 
 	const agent = agents.get(id)!;
-	console.log(`[Fleet] Stopping agent ${agent.name} (PID: ${agent.process.pid})...`);
+	agent.process.kill('SIGTERM');
 
-	// Send SIGTERM
-	const killed = agent.process.kill('SIGTERM');
-	console.log(`[Fleet] Kill signal sent: ${killed}`);
-
-	// Force kill if it doesn't exit for 3 seconds
 	setTimeout(() => {
 		if (agents.has(id)) {
-			// If still in map (cleanup removes it)
-			console.log(`[Fleet] Agent ${agent.name} did not exit. Force killing (SIGKILL)...`);
 			agent.process.kill('SIGKILL');
-			cleanup(id);
+			cleanup(id, true);
 		}
 	}, 3000);
-
-	// We optimistically remove from map or wait?
-	// Better to wait for exit event to call cleanup, but for API response we return success.
-	// But to avoid "duplicate" issues if start is called immediately, we might want to ensure it's gone.
-	// The cleanup function removes it from the map.
 
 	res.json({ success: true });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
 	console.log(`🚀 Agent Fleet Manager running on port ${PORT}`);
 	console.log(`[Fleet] Watching for agents...`);
+	await restoreAgents();
 });

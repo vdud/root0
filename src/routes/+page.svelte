@@ -138,7 +138,7 @@
 								>YOUR_KEYS</span
 							>';
 							<span class="keyword">const</span> MODEL = '<span class="string"
-								>arcee-ai/trinity-mini:free</span
+								>arcee-ai/trinity-large-preview:free</span
 							>';
 
 							<span class="keyword">await</span> window.root0.agent.connect(API_KEY);

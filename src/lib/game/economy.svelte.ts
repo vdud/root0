@@ -78,7 +78,7 @@ class EconomyState {
 			// Network Listeners for Marketplace Sync
 			if (typeof window !== 'undefined') {
 				window.addEventListener('market-sync', (e: any) => {
-					console.log('🛒 Market Synced:', e.detail.listings);
+					// console.log('🛒 Market Synced:', e.detail.listings);
 					this.marketListings = e.detail.listings;
 				});
 

@@ -5,7 +5,7 @@ This document outlines the architecture and steps used to deploy the Root0 Agent
 ## Architecture Overview
 
 - **Frontend:** SvelteKit hosted on **Vercel**.
-- **Game Server:** Hosted on **PartyKit** (`antigravity-server.vdud.partykit.dev`).
+- **Game Server:** Hosted on **PartyKit** (`root0-server.vdud.partykit.dev`).
 - **Agent Fleet Manager:** Node.js API hosted on **AWS EC2** (t2.micro) running in Docker.
 - **Image Registry:** **AWS ECR** (ap-south-1).
 - **AI Brain:** **OpenRouter API** (Trinity Large model).
@@ -15,10 +15,13 @@ This document outlines the architecture and steps used to deploy the Root0 Agent
 ## 1. The Infrastructure (AWS)
 
 ### Elastic Container Registry (ECR)
+
 We created a private repository named `root0-agent`.
+
 - **URI:** `428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent`
 
 ### EC2 Instance (The Host)
+
 - **Type:** `t2.micro` (Free Tier)
 - **OS:** Amazon Linux 2023
 - **Public IP:** `13.204.77.125`
@@ -56,7 +59,7 @@ docker run -d \
   -p 3000:3000 \
   --restart always \
   -e OPENROUTER_API_KEY="sk-or-v1-..." \
-  -e NEXT_PUBLIC_PARTYKIT_HOST="antigravity-server.vdud.partykit.dev" \
+  -e NEXT_PUBLIC_PARTYKIT_HOST="root0-server.vdud.partykit.dev" \
   428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
 ```
 
@@ -70,7 +73,9 @@ The `AgentManager.svelte.ts` has been updated to point to the EC2 IP.
 - **Production:** Talks to `http://13.204.77.125:3000`.
 
 ### Important Security Note (Mixed Content)
+
 Vercel uses HTTPS. AWS IP currently uses HTTP. Browsers will block this by default.
+
 - **Temporary Fix:** Click the "Shield/Lock" icon in the browser address bar and "Allow insecure content" for the site.
 - **Permanent Fix:** Assign a domain name (e.g., `api.root0.com`) to the EC2 IP and use Cloudflare or Let's Encrypt for SSL.
 
@@ -79,14 +84,19 @@ Vercel uses HTTPS. AWS IP currently uses HTTP. Browsers will block this by defau
 ## 5. Operations
 
 ### Checking Logs
+
 To see the Fleet Manager logs:
 `docker logs -f agent-fleet`
 
 ### Cleaning Up
+
 If the server gets slow (too many agents):
 `docker restart agent-fleet` (This will stop all running agents).
 
 ### Memory Persistence
+
 Currently, agent memories are stored inside the container's ephemeral storage. For long-term memory across server restarts, we should later mount an **AWS EFS** volume to `/app/.agent/memories`.
+
+```
 
 ```

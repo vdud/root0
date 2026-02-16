@@ -32,6 +32,8 @@ class AgentManagerState {
 
 	constructor() {
 		if (browser) {
+			// console.log('AgentManager constructor');
+
 			this.loadFromStorage();
 			this.syncWithFleet(); // Restore state from server
 			this.startDiscovery();
@@ -41,26 +43,40 @@ class AgentManagerState {
 				const { agentId, socketId, message, timestamp } = e.detail;
 
 				// DEBUG: See if logs are arriving in the browser console at all
-				console.log(`[AgentLog] Received: ${agentId} | Msg: ${message}`);
+				// console.log(`[AgentLog] Received: ${agentId} | Msg: ${message}`);
 
 				const timeStr = new Date(timestamp).toLocaleTimeString();
 				const logEntry = `[${timeStr}] ${message}`;
 
-				// 1. Update World Agents (Match by SocketID)
+				// 1. Update World Agents
+				// We try to match by SocketID first (most reliable for network)
+				// IF that fails, we try to match by AgentID (if the agent broadcasted it)
+				let worldIdx = -1;
 				if (socketId) {
+					worldIdx = this.worldAgents.findIndex((wa) => wa.id === socketId);
+				}
+
+				// Fallback: Check if any world agent has this agentId in their metadata (if we stored it)
+				// Currently WorldAgent doesn't store the UUID, but we can infer it if we add it to the discovered list
+				// For now, let's just stick to SocketID for World View as that's what `network` provides.
+
+				if (worldIdx !== -1) {
+					const wa = this.worldAgents[worldIdx];
+					const logs = wa.logs || []; // Ensure logs array exists
+					logs.push(logEntry);
+					if (logs.length > 50) logs.shift();
+
+					// Create a new object for reactivity
+					this.worldAgents[worldIdx] = {
+						...wa,
+						logs: [...logs]
+					};
+				} else if (socketId) {
+					// Buffer logs for agents we haven't 'discovered' yet but are hearing from
 					if (!this.remoteLogs.has(socketId)) this.remoteLogs.set(socketId, []);
 					const logs = this.remoteLogs.get(socketId)!;
 					logs.push(logEntry);
 					if (logs.length > 50) logs.shift();
-
-					const worldIdx = this.worldAgents.findIndex((wa) => wa.id === socketId);
-					if (worldIdx !== -1) {
-						// Create a new object for reactivity
-						this.worldAgents[worldIdx] = {
-							...this.worldAgents[worldIdx],
-							logs: [...logs]
-						};
-					}
 				}
 
 				// 2. Update Local Agents (Match by UUID = agentId)
@@ -76,9 +92,9 @@ class AgentManagerState {
 						newAgents[localIdx] = updatedAgent;
 						this.agents = newAgents;
 
-						console.log(
-							`[AgentLog] Updated Local Agent: ${updatedAgent.name} (Logs: ${updatedLogs.length})`
-						);
+						// console.log(
+						// 	`[AgentLog] Updated Local Agent: ${updatedAgent.name} (Logs: ${updatedLogs.length})`
+						// );
 					} else {
 						console.warn(`[AgentLog] Received log for UNKNOWN agent ID: ${agentId}`);
 					}
@@ -106,27 +122,33 @@ class AgentManagerState {
 				runningAgents.forEach((ra) => {
 					// Rule: If owner is unknown, DELETE THEM.
 					if (!ra.owner) {
-						console.warn(`[AgentManager] Found agent ${ra.name} with NO OWNER. Terminating...`);
-						this.stopAgent(ra.id, 'Agent has no owner (compliance check)');
+						console.warn(
+							`[AgentManager] Found agent ${ra.name} with NO OWNER. Logging only (debug mode)...`
+						);
+						// this.stopAgent(ra.id, 'Agent has no owner (compliance check)');
 						return;
 					}
 
 					// 3. Adopt agents owned by me matches
-					if (myAddress && ra.owner.toLowerCase() === myAddress) {
+					if (myAddress && ra.owner && ra.owner.toLowerCase() === myAddress) {
 						const exists = this.agents.some((a) => a.id === ra.id);
 						if (!exists) {
-							console.log(`[AgentManager] Adopting orphan agent: ${ra.name}`);
-							// We don't have the full config from fleet (purpose/behaviour are not returned yet, but we can default or fetch if we improved fleet API further)
-							// For now, we add them with basic info so they appear in the dashboard.
+							// console.log(`[AgentManager] Adopting orphan agent: ${ra.name}`);
 							this.addAgent({
 								id: ra.id,
 								name: ra.name,
-								purpose: 'Recovered from Fleet', // Placeholder as fleet doesn't return this yet
+								purpose: 'Recovered from Fleet',
 								behaviour: 'Neutral',
 								status: 'running',
 								logs: []
 							});
+						} else {
+							// console.log(`[AgentManager] Agent ${ra.name} (${ra.id}) spans local and remote.`);
 						}
+					} else {
+						// console.log(
+						// 	`[AgentManager] Skipping agent ${ra.name} (${ra.id}). Owner Mismatch. My Address: ${myAddress} | Agent Owner: ${ra.owner}`
+						// );
 					}
 				});
 			}
@@ -139,6 +161,10 @@ class AgentManagerState {
 		setInterval(() => {
 			if (!network || !network.otherPlayers) return;
 
+			// console.log('Discovery Tick');
+			// console.log('network', network);
+
+			// console.log(`[AgentManager] Discovery Tick. Players: ${network.otherPlayers.size}`);
 			const discovered: WorldAgent[] = [];
 
 			network.otherPlayers.forEach((p, id) => {
@@ -147,6 +173,8 @@ class AgentManagerState {
 					const agentOwner = (p as any).walletAddress?.toLowerCase();
 					const myAddress = web3.address?.toLowerCase();
 
+					// We want to see ALL agents in the World View, not just ours.
+					// isLocal determines if we have special control over them.
 					discovered.push({
 						id,
 						name: p.name || 'Unknown Agent',
@@ -222,18 +250,22 @@ class AgentManagerState {
 		}
 
 		try {
-			console.log('FLEET_URL', FLEET_URL);
-			console.log('agent', agent);
+			// console.log(
+			// 	`[AgentManager] Starting Agent: ${agent.name} (ID: ${agent.id}) Owner: ${web3.address}`
+			// );
+			const payload = {
+				id: agent.id,
+				name: agent.name,
+				purpose: agent.purpose,
+				behaviour: agent.behaviour,
+				owner: web3.address
+			};
+			// console.log('[AgentManager] Payload:', JSON.stringify(payload));
+
 			const res = await fetch(`${FLEET_URL}/agent/start`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					id: agent.id,
-					name: agent.name,
-					purpose: agent.purpose,
-					behaviour: agent.behaviour,
-					owner: web3.address // Pass the current wallet address as owner
-				})
+				body: JSON.stringify(payload)
 			});
 
 			if (res.ok) {
@@ -246,10 +278,10 @@ class AgentManagerState {
 		} catch (e) {
 			this.addLog(id, `❌ Network error connecting to Fleet.`);
 		}
-		console.log('Agent started', agent);
 	}
 
 	async stopAgent(id: string, reason?: string) {
+		// console.log(`[AgentManager] stopAgent called for ${id}. Reason: ${reason}`);
 		const agentIndex = this.agents.findIndex((a) => a.id === id);
 		// Note: We might be stopping an orphan agent not in our list, so continue even if index is -1
 
@@ -264,11 +296,18 @@ class AgentManagerState {
 				this.agents[agentIndex].status = 'stopped';
 				this.addLog(id, reason ? `🛑 Stopped: ${reason}` : '🛑 Stop command sent to Fleet.');
 			} else {
-				console.log(`[AgentManager] Stopped remote/orphan agent ${id}`);
+				// console.log(`[AgentManager] Stopped remote/orphan agent ${id}`);
 			}
 		} catch (e) {
 			console.error('Stop error', e);
 		}
+	}
+
+	async hardResync() {
+		this.agents = [];
+		localStorage.removeItem('root0_my_agents');
+		await this.syncWithFleet();
+		// console.log('[AgentManager] Hard Resync Complete. Found:', this.agents.length, 'agents.');
 	}
 
 	addLog(id: string, msg: string) {

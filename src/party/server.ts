@@ -176,7 +176,7 @@ export default class Server implements Party.Server {
 				[sender.id]
 			);
 		} else if (data.type === 'object-place') {
-			console.log(`Object placed: ${data.object.id}`);
+			// console.log(`Object placed: ${data.object.id}`);
 			this.worldObjects.set(data.object.id, data.object);
 			this.room.broadcast(
 				JSON.stringify({

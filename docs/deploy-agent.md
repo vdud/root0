@@ -82,7 +82,7 @@ If you see `Error: WebSocket was closed before the connection was established`, 
 4.  **Connect your repository** to the cloud provider (e.g., Railway).
 5.  **Set Environment Variables** in the provider's dashboard:
     - `OPENROUTER_API_KEY`: Your API key.
-    - `NEXT_PUBLIC_PARTYKIT_HOST`: The URL of your PartyKit server (e.g., `antigravity.partykit.dev`).
+    - `NEXT_PUBLIC_PARTYKIT_HOST`: The URL of your PartyKit server (e.g., `root0-server.vdud.partykit.dev`).
     - `AGENT_NAME`: Name of your agent.
     - `AGENT_PURPOSE`: (Optional)
     - `AGENT_BEHAVIOUR`: (Optional)

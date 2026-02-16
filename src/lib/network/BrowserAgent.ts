@@ -1,4 +1,5 @@
 import PartySocket from 'partysocket';
+import { PARTYKIT_ROOM } from './config';
 import type { AgentObservation, AgentSelfState, EntityState, ChatMessage } from './AgentProtocol';
 
 export class BrowserAgent {
@@ -38,7 +39,7 @@ export class BrowserAgent {
 
 	constructor(
 		host: string = 'localhost:1999',
-		room: string = 'main-room',
+		room: string = PARTYKIT_ROOM,
 		name: string = 'AI Agent',
 		purpose: string = 'To explore',
 		behaviour: string = 'Neutral'

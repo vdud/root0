@@ -1,4 +1,5 @@
 import PartySocket from 'partysocket';
+import { PARTYKIT_ROOM } from './config';
 import { WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -46,7 +47,7 @@ export class HeadlessAgent {
 
 	constructor(
 		host: string = 'localhost:1999',
-		room: string = 'main-room',
+		room: string = PARTYKIT_ROOM,
 		name: string = 'AI Agent',
 		owner: string = '',
 		id: string = ''
@@ -71,7 +72,7 @@ export class HeadlessAgent {
 
 	setupListeners() {
 		this.socket.addEventListener('open', () => {
-			console.log('🤖 Agent Connected to PartyKit');
+			// console.log('🤖 Agent Connected to PartyKit');
 			this.sendUpdate(); // Spawn immediately
 		});
 
@@ -195,14 +196,15 @@ export class HeadlessAgent {
 				// DEBUG: Log movement logic
 				if (now % 1000 < 60) {
 					console.log(
-						`[Agent Tick] Target: ${this.targetPosition.x},${this.targetPosition.z} | Dist: ${dist.toFixed(2)} | Pos: ${this.position.x.toFixed(2)},${this.position.y.toFixed(2)},${this.position.z.toFixed(2)}`
+						`[Agent Tick] Target: ${this.targetPosition.x.toFixed(2)},${this.targetPosition.z.toFixed(2)} | Dist: ${dist.toFixed(2)} | Pos: ${this.position.x.toFixed(2)},${this.position.y.toFixed(2)},${this.position.z.toFixed(2)}`
 					);
 				}
 			} else {
 				// Arrived
-				this.position.x = this.targetPosition.x;
 				this.position.z = this.targetPosition.z;
-				console.log(`[Agent Tick] Arrived at target: ${this.position.x}, ${this.position.z}`);
+				console.log(
+					`[Agent Tick] Arrived at target: ${this.position.x.toFixed(2)}, ${this.position.z.toFixed(2)}`
+				);
 				this.targetPosition = null;
 				this.movement.forward = 0.0;
 				moved = true; // Send final update to snap to exact position
@@ -245,9 +247,9 @@ export class HeadlessAgent {
 
 		// HEARTBEAT LOG (every ~2 seconds)
 		if (now % 2000 < this.TICK_RATE) {
-			console.log(
-				`💓 Tick Heartbeat | Pos: ${this.position.x.toFixed(2)},${this.position.y.toFixed(2)},${this.position.z.toFixed(2)} | Target: ${this.targetPosition ? 'YES' : 'NO'}`
-			);
+			// console.log(
+			// 	`💓 Tick Heartbeat | Pos: ${this.position.x.toFixed(2)},${this.position.y.toFixed(2)},${this.position.z.toFixed(2)} | Target: ${this.targetPosition ? 'YES' : 'NO'}`
+			// );
 		}
 	}
 
@@ -259,11 +261,11 @@ export class HeadlessAgent {
 		} else if (msg.type === 'player-leave') {
 			this.otherPlayers.delete(msg.id);
 		} else if (msg.type === 'player-join') {
-			console.log(`Player joined: ${msg.id}`);
+			// console.log(`Player joined: ${msg.id}`);
 		} else if (msg.type === 'chat-message') {
 			const { senderId, text, timestamp, targetId } = msg;
 
-			console.log(`[HeadlessAgent] 📩 Received chat-message from ${senderId}: "${text}"`);
+			// console.log(`[HeadlessAgent] 📩 Received chat-message from ${senderId}: "${text}"`);
 
 			// CHECK PROXIMITY
 			const sender = this.otherPlayers.get(senderId);
@@ -271,18 +273,18 @@ export class HeadlessAgent {
 				const dx = sender.x - this.position.x;
 				const dz = sender.z - this.position.z;
 				const dist = Math.sqrt(dx * dx + dz * dz);
-				console.log(`[HeadlessAgent] 📏 Distance to sender ${senderId}: ${dist.toFixed(2)}m`);
+				// console.log(`[HeadlessAgent] 📏 Distance to sender ${senderId}: ${dist.toFixed(2)}m`);
 
 				if (dist > 20) {
-					console.log(
-						`[HeadlessAgent] 🔇 Ignoring message from ${senderId} (too far: ${dist.toFixed(1)}m > 20m)`
-					);
+					// console.log(
+					// 	`[HeadlessAgent] 🔇 Ignoring message from ${senderId} (too far: ${dist.toFixed(1)}m > 20m)`
+					// );
 					return;
 				}
 			} else {
-				console.log(
-					`[HeadlessAgent] ⚠️ Sender ${senderId} not found in otherPlayers. Accepting message anyway.`
-				);
+				// console.log(
+				// 	`[HeadlessAgent] ⚠️ Sender ${senderId} not found in otherPlayers. Accepting message anyway.`
+				// );
 			}
 
 			const senderName =
@@ -290,7 +292,7 @@ export class HeadlessAgent {
 					? this.name
 					: this.otherPlayers.get(senderId)?.name || 'Unknown';
 
-			console.log(`[HeadlessAgent] ✅ Adding to chatLog: [${senderName}] ${text}`);
+			// console.log(`[HeadlessAgent] ✅ Adding to chatLog: [${senderName}] ${text}`);
 			this.chatLog.push({ senderId, content: text, timestamp, senderName, targetId });
 			if (this.chatLog.length > 50) this.chatLog.shift();
 
@@ -356,17 +358,7 @@ export class HeadlessAgent {
 	}
 
 	broadcastLog(message: string) {
-		if (!this.socket.id) return;
-		// Send a special debug message that the dashboard can pick up
-		this.socket.send(
-			JSON.stringify({
-				type: 'agent-debug-log',
-				agentId: this.id || this.socket.id,
-				message: message,
-				timestamp: Date.now()
-			})
-		);
-		console.log(message); // Keep local log too
+		// console.log(message);
 	}
 
 	sendUpdate() {

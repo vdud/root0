@@ -1,4 +1,5 @@
 import PartySocket from 'partysocket';
+import { PARTYKIT_ROOM } from './config';
 
 export type PlayerState = {
 	id: string;
@@ -61,12 +62,24 @@ export class NetworkManager implements AgentInterface {
 		const isDev = import.meta.env.DEV;
 
 		if (typeof window !== 'undefined') {
-			const host = isDev ? window.location.host : 'antigravity.partykit.dev';
+			const isDev = import.meta.env.DEV;
+			const envHost = import.meta.env.NEXT_PUBLIC_PARTYKIT_HOST;
+
+			// If env var is set, use it.
+			// If not, in dev use localhost:1999.
+			// In prod, use the gathered production host.
+			const host = envHost || (isDev ? 'localhost:1999' : 'root0-server.vdud.partykit.dev');
+			// console.log('[NetworkManager] Connecting to PartyKit Host:', host);
+
+			// If connecting to a remote server (not localhost), we MUST use WSS (Secure WebSocket)
+			// even if we are running on HTTP localhost.
+			const isLocalHost = host.includes('localhost') || host.includes('127.0.0.1');
+			const protocol = isLocalHost ? 'ws' : 'wss';
 
 			this.socket = new PartySocket({
 				host,
-				room: 'main-room',
-				protocol: window.location.protocol === 'https:' ? 'wss' : 'ws'
+				room: PARTYKIT_ROOM,
+				protocol
 			});
 
 			this.socket.addEventListener('open', () => {
@@ -94,7 +107,7 @@ export class NetworkManager implements AgentInterface {
 
 	// --- Agent Interface Implementation ---
 	async connect(apiKey: string): Promise<boolean> {
-		console.log('🤖 Agent connecting with key:', apiKey);
+		// console.log('🤖 Agent connecting with key:', apiKey);
 		// TODO: Validate API Key with server
 		this.isAgent = true;
 		return true;
@@ -110,7 +123,7 @@ export class NetworkManager implements AgentInterface {
 
 		// Handle Chat locally first (broadcast to others via PartyKit if needed)
 		if (command.type === 'chat') {
-			console.log('💬 Agent speaking:', command.payload.text);
+			// console.log('💬 Agent speaking:', command.payload.text);
 			this.sendChatMessage(command.payload.text);
 		}
 
@@ -166,7 +179,7 @@ export class NetworkManager implements AgentInterface {
 		if (typeof window === 'undefined') return;
 		try {
 			this.myStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-			console.log('[VoiceDebug] 🎙️ Microphone access granted.');
+			// console.log('[VoiceDebug] 🎙️ Microphone access granted.');
 			this.evaluateRenegotiation();
 
 			// If we already have peers (late join), add the track to them?
@@ -186,7 +199,9 @@ export class NetworkManager implements AgentInterface {
 			if (id === this.socket.id) return;
 
 			if (data.isAgent) {
-				// console.log(`[Client] Received Agent Update for ${id}:`, data.x, data.z);
+				// console.log(
+				// 	`[Network] 🤖 Received Agent Update for ${id} (Owner: ${data.walletAddress}) @ ${data.x?.toFixed(1)},${data.z?.toFixed(1)}`
+				// );
 			}
 
 			if (!this.otherPlayers.has(id)) {
@@ -201,7 +216,7 @@ export class NetworkManager implements AgentInterface {
 		} else if (msg.type === 'chat-message') {
 			// Incoming chat from another player (or agent)
 			const { id, senderId, text } = msg; // msg structure: { type, id, senderId, text, timestamp, targetId }
-			console.log(`[NetworkManager] Chat received from ${senderId}: "${text}"`);
+			// console.log(`[NetworkManager] Chat received from ${senderId}: "${text}"`);
 
 			// Update the sender's state to show the bubble
 			if (this.otherPlayers.has(senderId)) {
@@ -255,6 +270,7 @@ export class NetworkManager implements AgentInterface {
 		} else if (msg.type === 'market-sync') {
 			window.dispatchEvent(new CustomEvent('market-sync', { detail: { listings: msg.listings } }));
 		} else if (msg.type === 'agent-debug-log') {
+			// Broadcast agent logs to all clients (for dashboard)
 			window.dispatchEvent(
 				new CustomEvent('agent-debug-log', {
 					detail: {
@@ -338,9 +354,9 @@ export class NetworkManager implements AgentInterface {
 			if (this.peers.has(player.id)) {
 				// We are currently connected
 				if (dist > this.VOICE_DISCONNECT_DISTANCE) {
-					console.log(
-						`[VoiceDebug] 🔇 ${player.id} LEFT range (${dist.toFixed(1)}m > ${this.VOICE_DISCONNECT_DISTANCE}m). Disconnecting...`
-					);
+					// console.log(
+					// 	`[VoiceDebug] 🔇 ${player.id} LEFT range (${dist.toFixed(1)}m > ${this.VOICE_DISCONNECT_DISTANCE}m). Disconnecting...`
+					// );
 					this.cleanupPeer(player.id);
 				}
 			} else {
@@ -348,9 +364,9 @@ export class NetworkManager implements AgentInterface {
 				if (dist <= this.VOICE_CONNECT_DISTANCE) {
 					// Connect if we are the dominant ID (to avoid glare/collision)
 					if (this.socket.id > player.id) {
-						console.log(
-							`[VoiceDebug] 🔊 ${player.id} ENTERED range (${dist.toFixed(1)}m <= ${this.VOICE_CONNECT_DISTANCE}m). Initiating Connection...`
-						);
+						// console.log(
+						// 	`[VoiceDebug] 🔊 ${player.id} ENTERED range (${dist.toFixed(1)}m <= ${this.VOICE_CONNECT_DISTANCE}m). Initiating Connection...`
+						// );
 						this.createPeer(player.id, true);
 					} else {
 						// We wait for them to connect to us
@@ -362,7 +378,7 @@ export class NetworkManager implements AgentInterface {
 	}
 
 	cleanupPeer(targetId: string) {
-		console.log(`[VoiceDebug] 🧹 Cleaning up peer ${targetId}`);
+		// console.log(`[VoiceDebug] 🧹 Cleaning up peer ${targetId}`);
 		if (this.peers.has(targetId)) {
 			this.peers.get(targetId)?.close();
 			this.peers.delete(targetId);
@@ -371,7 +387,7 @@ export class NetworkManager implements AgentInterface {
 			const stream = this.voiceStreams.get(targetId);
 			if (stream) {
 				stream.getTracks().forEach((track) => {
-					console.log(`[VoiceDebug] 🛑 Stopping track for ${targetId}:`, track.kind);
+					// console.log(`[VoiceDebug] 🛑 Stopping track for ${targetId}:`, track.kind);
 					track.stop();
 				});
 			}
@@ -413,7 +429,7 @@ export class NetworkManager implements AgentInterface {
 		// Monitor connection state
 		pc.onconnectionstatechange = () => {
 			const state = pc.connectionState;
-			console.log(`[VoiceDebug] 📡 Peer ${targetId} connection state:`, state);
+			// console.log(`[VoiceDebug] 📡 Peer ${targetId} connection state:`, state);
 			if (state === 'failed' || state === 'disconnected' || state === 'closed') {
 				// Peer died. Attempt restart if we are the initiator or if it stays dead.
 				// Simple strategy: Just try to restart after a delay.
@@ -428,7 +444,7 @@ export class NetworkManager implements AgentInterface {
 
 		pc.oniceconnectionstatechange = () => {
 			const state = pc.iceConnectionState;
-			console.log(`[VoiceDebug] ❄️ Peer ${targetId} ICE state:`, state);
+			// console.log(`[VoiceDebug] ❄️ Peer ${targetId} ICE state:`, state);
 			if (state === 'failed' || state === 'disconnected') {
 				// ICE failed.
 				setTimeout(() => {
@@ -499,7 +515,7 @@ export class NetworkManager implements AgentInterface {
 				// FLUSH ICE QUEUE
 				if (this.iceQueues.has(senderId)) {
 					const queue = this.iceQueues.get(senderId)!;
-					console.log(`[VoiceDebug] 🧊 Flushing ${queue.length} ICE candidates for ${senderId}`);
+					// console.log(`[VoiceDebug] 🧊 Flushing ${queue.length} ICE candidates for ${senderId}`);
 					for (const candidate of queue) {
 						await pc.addIceCandidate(candidate);
 					}

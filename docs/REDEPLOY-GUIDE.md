@@ -18,6 +18,16 @@ docker tag root0-agent:latest 428589675370.dkr.ecr.ap-south-1.amazonaws.com/root
 docker push 428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
 ```
 
+### Extras
+
+```bash
+# To restart the fleet manager
+docker-compose down --remove-orphans && docker-compose up -d
+# Check Logs
+
+docker logs -f root0-agent-fleet-1
+```
+
 ## 2. On Your AWS EC2 Terminal
 
 Connect to your EC2 instance and run these to pull the new version and restart the Fleet Manager.
@@ -25,20 +35,31 @@ Connect to your EC2 instance and run these to pull the new version and restart t
 ```bash
 # A. Stop and remove the old container
 docker rm -f agent-fleet
+docker system prune -a -f
 
 # B. Pull the fresh image from ECR
 docker pull 428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
 
 # C. Restart the Fleet Manager
 # Replace "YOUR_KEY" with your actual OpenRouter API Key
-docker run -d \
-  --name agent-fleet \
-  -p 3000:3000 \
-  --restart always \
-  -e OPENROUTER_API_KEY="YOUR_KEY" \
-  -e NEXT_PUBLIC_PARTYKIT_HOST="antigravity-server.vdud.partykit.dev" \
-  428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
+# docker run -d \
+#   --name agent-fleet \
+#   -p 3000:3000 \
+#   --restart always \
+#   -e OPENROUTER_API_KEY="YOUR_KEY" \
+#   -e NEXT_PUBLIC_PARTYKIT_HOST="root0-server.vdud.partykit.dev" \
+#   428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
+
+
+  docker run -d --name agent-fleet -p 3000:3000 --restart always -e OPENROUTER_API_KEY="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" -e NEXT_PUBLIC_PARTYKIT_HOST="root0-server.vdud.partykit.dev" 428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
 ```
+
+```bash
+# Check logs
+docker logs -f agent-fleet
+```
+
+> **Note:** The `NEXT_PUBLIC_PARTYKIT_HOST` variable is now optional if you are connecting to production, as it defaults to `root0-server.vdud.partykit.dev` in the code. However, keeping it makes the configuration explicit.
 
 ## 3. Update the Frontend (Vercel)
 
@@ -57,5 +78,7 @@ git push origin main
 - **Check Logs:** `docker logs -f agent-fleet`
 - **Verify Port 3000:** Check AWS Console -> Security Groups -> Inbound Rules.
 - **Architecture Error:** If you see `exec format error`, it means the image was built for `arm64` (Mac) instead of `amd64` (AWS). Re-run the build with the `--platform` flag.
+
+```
 
 ```

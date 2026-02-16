@@ -1,4 +1,5 @@
 import { HeadlessAgent } from '../src/lib/network/HeadlessAgent';
+import { PARTYKIT_ROOM } from '../src/lib/network/config';
 import OpenAI from 'openai';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
@@ -13,14 +14,42 @@ if (!OPENROUTER_API_KEY) {
 	process.exit(1);
 }
 
+// Log connection details for debugging
+// console.log(`[Agent] Model: ${MODEL}`);
+// console.log(`[Agent] Base URL: https://openrouter.ai/api/v1`);
+// console.log(`[Agent] API Key: ${OPENROUTER_API_KEY.slice(0, 4)}...${OPENROUTER_API_KEY.slice(-4)}`);
+
 const openai = new OpenAI({
 	baseURL: 'https://openrouter.ai/api/v1',
 	apiKey: OPENROUTER_API_KEY,
 	defaultHeaders: {
-		'HTTP-Referer': 'https://antigravity.partykit.dev', // Optional, for including your app on openrouter.ai rankings.
-		'X-Title': 'Antigravity Agent' // Optional. Shows in rankings on openrouter.ai.
+		'HTTP-Referer': 'https://antigravity-server.vdud.partykit.dev',
+		'X-Title': 'Antigravity Agent'
 	}
 });
+
+// 🔍 DIAGNOSTIC: Raw Connectivity Check
+(async () => {
+	// console.log('🔍 Running Raw Connectivity Check to OpenRouter...');
+	try {
+		const res = await fetch('https://openrouter.ai/api/v1/models', {
+			method: 'GET',
+			headers: {
+				Authorization: `Bearer ${OPENROUTER_API_KEY}`
+			}
+		});
+		const text = await res.text();
+		// console.log(`🔍 Connectivity Check Status: ${res.status}`);
+		// console.log(`🔍 Connectivity Check Headers:`, Object.fromEntries(res.headers.entries()));
+		if (!res.ok) {
+			console.error(`❌ Connectivity Check Failed Body: ${text.slice(0, 500)}`);
+		} else {
+			// console.log(`✅ Connectivity Check Success. OpenRouter is reachable.`);
+		}
+	} catch (e: any) {
+		// console.error(`❌ Connectivity Check Network Error:`, e.message);
+	}
+})();
 
 async function main() {
 	// Parse command line arguments
@@ -42,7 +71,7 @@ async function main() {
 	let shouldSeed = args.includes('--seed') || process.env.AGENT_SEED === 'true';
 
 	if (!purpose) {
-		console.log('ℹ️ No purpose specified. Defaulting to explorer.');
+		// console.log('ℹ️ No purpose specified. Defaulting to explorer.');
 		purpose = 'explore, greet people, and be interesting.';
 	}
 
@@ -56,22 +85,22 @@ async function main() {
 	let memory = '';
 	if (fs.existsSync(memoryFile)) {
 		memory = fs.readFileSync(memoryFile, 'utf8');
-		console.log(`🧠 Loaded existing memory for ${name}`);
+		// console.log(`🧠 Loaded existing memory for ${name}`);
 	} else {
-		console.log(`✨ Created new memory for ${name}`);
+		// console.log(`✨ Created new memory for ${name}`);
 		memory = `Memory log for ${name}. Created at ${new Date().toISOString()}
 `;
 		fs.writeFileSync(memoryFile, memory);
 	}
 
-	const host = process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'antigravity.partykit.dev';
-	const room = 'main-room';
+	const host = process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'localhost:1999';
+	const room = PARTYKIT_ROOM;
 	const agentId = process.env.AGENT_ID || 'unknown-id';
 
-	console.log(`[Agent] Initializing "${name}"...`);
-	console.log(`[Agent] ID: ${agentId}`);
-	console.log(`[Agent] Target Host: ${host}`);
-	console.log(`[Agent] Version: 1.0.1 (Sync Check: ${new Date().toISOString()})`);
+	// console.log(`[Agent] Initializing "${name}"...`);
+	// console.log(`[Agent] ID: ${agentId}`);
+	// console.log(`[Agent] Target Host: ${host}`);
+	// console.log(`[Agent] Version: 1.0.1 (Sync Check: ${new Date().toISOString()})`);
 
 	const agent = new HeadlessAgent(host, room, name, ownerAddress, agentId);
 
@@ -95,8 +124,8 @@ async function main() {
 					})
 				);
 			}
-		} catch (e) {
-			// Ignore
+		} catch (e: any) {
+			originalError('❌ streamToDashboard failed:', e.message || e);
 		}
 	};
 
@@ -494,6 +523,23 @@ async function main() {
 						console.log(`✅ API Response received in ${Date.now() - startTime}ms`);
 
 						let content = completion.choices[0].message.content?.trim();
+						console.log(`🤖 Raw LLM Content: ${content}`);
+						if (!content) {
+							console.warn('⚠️ LLM returned empty content!');
+							// Fallback: If addressed directly, say something
+							if (
+								observation.chatLog.some(
+									(m) => m.targetId === agent.socket.id && Date.now() - m.timestamp < 10000
+								)
+							) {
+								console.log('⚠️ Empty response to DM. Forcing fallback reply.');
+								content = JSON.stringify({
+									action: 'WAIT',
+									message: "I heard you, but I'm having trouble thinking clearly."
+								});
+							}
+						}
+
 						console.log(`🤖 Raw LLM Content: ${content}`);
 						if (content) {
 							try {

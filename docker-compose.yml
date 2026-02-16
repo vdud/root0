@@ -8,13 +8,15 @@ services:
     build: .
     # Use 'watch' to restart on file changes
     command: npx tsx watch agent/fleet.ts
+    # command: tail -f /dev/null
     volumes:
       - .:/app
       - /app/node_modules
     environment:
       # Connect to the host machine's PartyKit server (User's 'npx partykit dev')
-      - NEXT_PUBLIC_PARTYKIT_HOST=host.docker.internal:1999
+      - NEXT_PUBLIC_PARTYKIT_HOST=${NEXT_PUBLIC_PARTYKIT_HOST:-host.docker.internal:1999}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - DATABASE_URL=${DATABASE_URL}
       # Pass through other env vars if needed
     ports:
       - '3000:3000'

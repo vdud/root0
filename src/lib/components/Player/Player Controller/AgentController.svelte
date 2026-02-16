@@ -27,7 +27,7 @@
 	// Command Handler
 
 	function handleCommand(cmd: any) {
-		console.log('%c🤖 Agent Controller Received:', 'background: #222; color: #bada55', cmd);
+		// console.log('%c🤖 Agent Controller Received:', 'background: #222; color: #bada55', cmd);
 
 		// Visual Feedback for debug
 		if (typeof window !== 'undefined') {

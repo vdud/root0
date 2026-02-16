@@ -4,6 +4,13 @@
 	import { onMount } from 'svelte';
 	import { fade, fly, slide } from 'svelte/transition';
 
+	$effect(() => {
+		// console.log('[Dashboard] World Agents Update:', $state.snapshot(agentManager.worldAgents));
+		agentManager.worldAgents.forEach((a) => {
+			// console.log(`[Dashboard] Agent ${a.name} (${a.id}) Logs:`, $state.snapshot(a.logs).length);
+		});
+	});
+
 	let selectedAgentId = $state<string | null>(null);
 	let isCreating = $state(false);
 	let activeTab = $state<'factory' | 'world'>('factory');
@@ -46,6 +53,21 @@
 			if (selectedAgentId === id) selectedAgentId = null;
 		}
 	}
+
+	let globalLogs = $state<string[]>([]);
+
+	onMount(() => {
+		const handleLog = (e: any) => {
+			const { agentId, message, timestamp } = e.detail;
+			const timeStr = new Date(timestamp).toLocaleTimeString();
+			globalLogs = [`[${timeStr}] [${agentId?.slice(0, 8)}] ${message}`, ...globalLogs].slice(
+				0,
+				50
+			);
+		};
+		window.addEventListener('agent-debug-log', handleLog);
+		return () => window.removeEventListener('agent-debug-log', handleLog);
+	});
 </script>
 
 {#if !web3.isConnected}
@@ -234,6 +256,12 @@
 							<h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest pl-2">
 								Available Units
 							</h3>
+							<button
+								class="text-xs text-purple-400 hover:text-white underline cursor-pointer"
+								onclick={() => agentManager.hardResync()}
+							>
+								Sync Fleet
+							</button>
 						</div>
 
 						<div class="flex-1 overflow-y-auto px-2 pb-2 space-y-2 custom-scrollbar">
