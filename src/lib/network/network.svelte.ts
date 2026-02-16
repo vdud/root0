@@ -68,13 +68,14 @@ export class NetworkManager implements AgentInterface {
 			// If env var is set, use it.
 			// If not, in dev use localhost:1999.
 			// In prod, use the gathered production host.
-			const host = envHost || (isDev ? 'localhost:1999' : 'root0-server.vdud.partykit.dev');
+			const host =
+				envHost || (isDev ? `${window.location.hostname}:1999` : 'root0-server.vdud.partykit.dev');
 			// console.log('[NetworkManager] Connecting to PartyKit Host:', host);
 
 			// If connecting to a remote server (not localhost), we MUST use WSS (Secure WebSocket)
 			// even if we are running on HTTP localhost.
-			const isLocalHost = host.includes('localhost') || host.includes('127.0.0.1');
-			const protocol = isLocalHost ? 'ws' : 'wss';
+			const isSecure = window.location.protocol === 'https:';
+			const protocol = isSecure ? 'wss' : isDev ? 'ws' : 'wss';
 
 			this.socket = new PartySocket({
 				host,

@@ -119,6 +119,11 @@
 		/>
 	{/if}
 
+	<!-- Hack: Hidden audio element to ensure browser processes the stream -->
+	{#if stream}
+		<audio use:srcObject={stream} muted hidden></audio>
+	{/if}
+
 	<!-- DEBUG INDICATOR: Red = No Audio Stream, Green = Audio Stream Active -->
 	<T.Mesh position={[0, 2.2, 0]}>
 		<T.SphereGeometry args={[0.15]} />

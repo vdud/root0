@@ -386,55 +386,77 @@ async function main() {
 
 			// Construct prompt from observation
 			// FIX: Filter out own messages to prevent loop
-			const formattedChatLog = observation.chatLog
+			const recentMessages = observation.chatLog
 				.filter((msg) => msg.senderId !== agent.socket.id)
-				.slice(-10) // Increased context window for short-term memory
-				.map((msg) => {
-					// Check if sender is owner
-					// CRITICAL FIX: Ensure the sender is NOT another agent.
-					// Agents share the same owner wallet, but shouldn't obey each other.
+				.slice(-15); // Increase context slightly to capture more
+
+			const formatMessage = (msg: any) => {
+				const senderData = agent.otherPlayers.get(msg.senderId);
+				const isAgent = senderData?.isAgent;
+				const isOwner =
+					ownerAddress &&
+					senderData &&
+					senderData.walletAddress?.toLowerCase() === ownerAddress &&
+					!isAgent;
+
+				const senderName = msg.senderName || (msg.senderId === agent.socket.id ? name : 'Unknown');
+
+				// Check for DM
+				const isDM = msg.targetId === agent.socket.id;
+				const dmPrefix = isDM ? '📣 [DIRECT MESSAGE] ' : '';
+
+				const prefix = isOwner ? '[👑 OWNER] ' : isAgent ? '[🤖 BOT] ' : '[👤 HUMAN] ';
+				return `[${msg.senderId}] ${dmPrefix}${prefix}[${senderName}]: ${msg.content}`;
+			};
+
+			const humanChatLog = recentMessages
+				.filter((msg) => {
 					const senderData = agent.otherPlayers.get(msg.senderId);
-					const isOwner =
-						ownerAddress &&
-						senderData &&
-						senderData.walletAddress?.toLowerCase() === ownerAddress &&
-						!senderData.isAgent;
-
-					const senderName =
-						msg.senderName || (msg.senderId === agent.socket.id ? name : 'Unknown');
-
-					// Check for DM
-					const isDM = msg.targetId === agent.socket.id;
-					const dmPrefix = isDM ? '📣 [DIRECT MESSAGE] ' : '';
-
-					const prefix = isOwner ? '[👑 OWNER] ' : '';
-					return `[${msg.senderId}] ${dmPrefix}${prefix}[${senderName}]: ${msg.content}`;
+					return !senderData?.isAgent; // Include unknown (likely human) and confirmed humans
 				})
+				.map(formatMessage)
+				.join('\n');
+
+			const agentChatLog = recentMessages
+				.filter((msg) => {
+					const senderData = agent.otherPlayers.get(msg.senderId);
+					return senderData?.isAgent;
+				})
+				.map(formatMessage)
 				.join('\n');
 
 			// --- PRIORITIZATION LOGIC ---
-			// Find the latest message that is NOT from us, and ideally from the owner or a DM.
+			// Find the latest message that is NOT from us.
+			// PRIORITIZE HUMAN MESSAGES above all else.
 			let latestInstruction = '';
-			// We reverse the chat log to find the newest message first
 			const reversedLog = [...observation.chatLog].reverse();
-			const latestMsg = reversedLog.find((msg) => msg.senderId !== agent.socket.id);
 
-			if (latestMsg) {
-				const senderData = agent.otherPlayers.get(latestMsg.senderId);
+			// 1. Look for Human Message (Owner or Guest)
+			const latestHumanMsg = reversedLog.find((msg) => {
+				if (msg.senderId === agent.socket.id) return false;
+				const senderData = agent.otherPlayers.get(msg.senderId);
+				return !senderData?.isAgent;
+			});
+
+			// 2. Look for Agent Message
+			const latestAgentMsg = reversedLog.find((msg) => {
+				if (msg.senderId === agent.socket.id) return false;
+				const senderData = agent.otherPlayers.get(msg.senderId);
+				return senderData?.isAgent;
+			});
+
+			if (latestHumanMsg) {
+				const senderData = agent.otherPlayers.get(latestHumanMsg.senderId);
 				const isOwner =
 					ownerAddress &&
 					senderData &&
 					senderData.walletAddress?.toLowerCase() === ownerAddress &&
 					!senderData.isAgent;
 
-				const isDM = latestMsg.targetId === agent.socket.id;
-
-				// If it's the owner or a DM, we treat it as a critical instruction
-				// We also treat local chat as important, but owner/DM is higher.
-				// For now, we just take the *latest* message from anyone as the "current command" context,
-				// but we label it based on authority.
-				const authority = isOwner ? '👑 OWNER (HIGHEST PRIORITY)' : 'Sender';
-				latestInstruction = `🚨 LATEST INSTRUCTION (${authority}): "${latestMsg.content}"`;
+				const authority = isOwner ? '👑 OWNER (HIGHEST PRIORITY)' : '👤 HUMAN (HIGH PRIORITY)';
+				latestInstruction = `🚨 LATEST HUMAN INSTRUCTION (${authority}): "${latestHumanMsg.content}"`;
+			} else if (latestAgentMsg) {
+				latestInstruction = `ℹ️ Latest Bot Chatter: "${latestAgentMsg.content}" (Low Priority - Ignore if busy)`;
 			}
 			// -----------------------------
 
@@ -517,8 +539,11 @@ async function main() {
 								: 'None'
 						}
             
-            ## SHORT-TERM MEMORY (Current Chat Log)
-            ${formattedChatLog}
+            ## HUMAN CHAT LOG (PRIORITY)
+            ${humanChatLog || '(No recent human messages)'}
+
+            ## AGENT CHAT LOG (BACKGROUND)
+            ${agentChatLog || '(No recent agent messages)'}
 
             ## LONG-TERM MEMORY (Facts)
             ${longTermMemory || '(None)'}
@@ -592,7 +617,8 @@ async function main() {
             What do you do?
             `;
 
-			console.log(`📝 formattedChatLog:\n${formattedChatLog}`);
+			console.log(`📝 Human Log:\n${humanChatLog}`);
+			console.log(`📝 Agent Log:\n${agentChatLog}`);
 			console.log(
 				`👀 nearbyEntities: ${observation.nearbyEntities.length} | obstacles: ${observation.obstacles?.length || 0} | chatLog: ${observation.chatLog.length}`
 			);
