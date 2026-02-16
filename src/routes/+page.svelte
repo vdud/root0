@@ -41,12 +41,12 @@
 					<div class="cta-wrapper">
 						<!-- Disable preload to prevent body style changes on hover -->
 						<a
-							href="/dashboard"
+							href="/play"
 							class="enter-btn"
 							data-sveltekit-preload-data="off"
 							data-sveltekit-preload-code="off"
 						>
-							<span class="btn-text">Enter Command Center</span>
+							<span class="btn-text">Enter World</span>
 							<span class="btn-icon">→</span>
 						</a>
 
