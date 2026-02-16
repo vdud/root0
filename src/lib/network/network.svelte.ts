@@ -414,6 +414,40 @@ export class NetworkManager implements AgentInterface {
 		// Proximity loop handles it.
 	}
 
+	// Track negotiation state per peer to handle glare
+	makingOffer = new Map<string, boolean>();
+
+	sendSignal(targetId: string, signal: any) {
+		if (this.socket.readyState !== this.socket.OPEN) return;
+		this.socket.send(
+			JSON.stringify({
+				type: 'voice-signal',
+				targetId,
+				signal
+			})
+		);
+	}
+
+	// Helper for "Perfect Negotiation" - initiating
+	async startNegotiation(targetId: string, pc: RTCPeerConnection) {
+		try {
+			this.makingOffer.set(targetId, true);
+			await pc.setLocalDescription(); // Auto-creates offer in modern WebRTC
+
+			// Fallback for older browsers if needed, but modern typically supports empty setLocalDescription() for restart?
+			// Actually safer to use createOffer for now to be explicit.
+			// const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+
+			if (pc.localDescription) {
+				this.sendSignal(targetId, { sdp: pc.localDescription });
+			}
+		} catch (err) {
+			console.error(`[VoiceDebug] Failed to create offer for ${targetId}`, err);
+		} finally {
+			this.makingOffer.set(targetId, false);
+		}
+	}
+
 	// Call this when we get a mic or change tracks
 	evaluateRenegotiation() {
 		// 1. Add tracks to all existing peers
@@ -429,11 +463,8 @@ export class NetworkManager implements AgentInterface {
 						console.log(`[VoiceDebug] 🎙️ Adding late track to peer ${peerId}`);
 						audioTracks.forEach((track) => pc.addTrack(track, this.myStream!));
 
-						// Renegotiate (Create Offer)
-						pc.createOffer().then((offer) => {
-							pc.setLocalDescription(offer);
-							this.sendSignal(peerId, { sdp: offer });
-						});
+						// Trigger negotiation
+						this.startNegotiation(peerId, pc);
 					}
 				}
 			}
@@ -453,6 +484,12 @@ export class NetworkManager implements AgentInterface {
 		const pc = new RTCPeerConnection({
 			iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
 		});
+
+		// Handle Negotiation Needed (Polite Peer Pattern support)
+		pc.onnegotiationneeded = () => {
+			console.log(`[VoiceDebug] 🚨 Negotiation Needed for ${targetId}`);
+			this.startNegotiation(targetId, pc);
+		};
 
 		// Monitor connection state
 		pc.onconnectionstatechange = () => {
@@ -508,10 +545,16 @@ export class NetworkManager implements AgentInterface {
 
 		// Create Offer if initiator
 		if (initiator) {
-			pc.createOffer().then((offer) => {
-				pc.setLocalDescription(offer);
-				this.sendSignal(targetId, { sdp: offer });
-			});
+			// this.startNegotiation(targetId, pc);
+			// Wait, onnegotiationneeded might fire automatically when we add tracks?
+			// But for initial creation without tracks, we forced it.
+			// Let's call it manually to be safe.
+			// But wait, if we added tracks above, onnegotiationneeded MIGHT fire?
+			// To be safe, let's allow onnegotiationneeded to handle it OR force it if no tracks.
+			// Actually, standard practice is to just wait for negotiationneeded.
+			// But if we have no tracks, it won't fire?
+			// Data channels would trigger it. We don't use them yet.
+			// So yes, manual trigger if initiator.
 		}
 
 		this.peers.set(targetId, pc);
@@ -530,21 +573,40 @@ export class NetworkManager implements AgentInterface {
 		}
 
 		const pc = this.peers.get(senderId)!;
+		const description = signal.sdp;
+		const candidate = signal.ice;
 
 		try {
-			if (signal.sdp) {
-				// Prevent loop: If we are 'stable' and receive an 'answer', it's redundant/error
-				if (pc.signalingState === 'stable' && signal.sdp.type === 'answer') {
-					console.warn(`Ignoring answer from ${senderId} because signalingState is stable.`);
-					return;
+			if (description) {
+				// collision detection (Polite Peer)
+				const isStable =
+					pc.signalingState === 'stable' ||
+					(pc.signalingState === 'stable' && !this.makingOffer.get(senderId));
+				const offerCollision = description.type === 'offer' && !isStable;
+
+				const polite = this.socket.id < senderId; // Lower ID is polite
+
+				if (offerCollision) {
+					if (!polite) {
+						console.warn(
+							`[VoiceDebug] ⚔️ Glare detected. I am IMPOLITE (${this.socket.id} > ${senderId}). Ignoring offer.`
+						);
+						return;
+					}
+					console.warn(
+						`[VoiceDebug] ⚔️ Glare detected. I am POLITE (${this.socket.id} < ${senderId}). Rolling back & accepting.`
+					);
+
+					// Rollback (implied by setting remote description in some flows, but usually needs rollback)
+					await Promise.all([
+						pc.setLocalDescription({ type: 'rollback' }),
+						pc.setRemoteDescription(description)
+					]);
+				} else {
+					await pc.setRemoteDescription(description);
 				}
 
-				// If we receive an 'offer' but we are not 'stable', we might be in a glare (collision).
-				// Simple conflict resolution: if we are trying to offer too, but they have higher ID, let them win?
-				// For now, let's just proceed and let WebRTC roll-back if needed.
-
-				await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-				console.log(`[VoiceDebug] ✅ Set Remote Description (${signal.sdp.type}) for ${senderId}`);
+				console.log(`[VoiceDebug] ✅ Set Remote Description (${description.type}) for ${senderId}`);
 
 				// FLUSH ICE QUEUE
 				if (this.iceQueues.has(senderId)) {
@@ -565,15 +627,22 @@ export class NetworkManager implements AgentInterface {
 					}
 				}
 
-				if (signal.sdp.type === 'offer') {
-					const answer = await pc.createAnswer();
-					await pc.setLocalDescription(answer);
-					this.sendSignal(senderId, { sdp: answer });
+				if (description.type === 'offer') {
+					await pc.setLocalDescription(await pc.createAnswer());
+					this.sendSignal(senderId, { sdp: pc.localDescription });
 				}
-			} else if (signal.ice) {
+			} else if (candidate) {
 				// ICE candidate buffering: Only add if remote description is set
-				if (pc.remoteDescription) {
-					await pc.addIceCandidate(new RTCIceCandidate(signal.ice));
+				if (pc.remoteDescription && pc.remoteDescription.type) {
+					try {
+						await pc.addIceCandidate(candidate);
+					} catch (err) {
+						if (!this.makingOffer.get(senderId)) {
+							console.warn(`[VoiceDebug] 🧊 Buffering ICE (failed to add):`, err);
+							if (!this.iceQueues.has(senderId)) this.iceQueues.set(senderId, []);
+							this.iceQueues.get(senderId)!.push(candidate);
+						}
+					}
 				} else {
 					console.warn(
 						`[VoiceDebug] 🧊 Buffering ICE from ${senderId} because remoteDescription is null`
@@ -581,22 +650,12 @@ export class NetworkManager implements AgentInterface {
 					if (!this.iceQueues.has(senderId)) {
 						this.iceQueues.set(senderId, []);
 					}
-					this.iceQueues.get(senderId)!.push(new RTCIceCandidate(signal.ice));
+					this.iceQueues.get(senderId)!.push(candidate);
 				}
 			}
 		} catch (e) {
 			console.error(`Error handling signal from ${senderId}:`, e);
 		}
-	}
-
-	sendSignal(targetId: string, signal: any) {
-		this.socket.send(
-			JSON.stringify({
-				type: 'voice-signal',
-				targetId,
-				signal
-			})
-		);
 	}
 
 	// --- Marketplace Network Methods ---
