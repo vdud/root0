@@ -414,7 +414,30 @@ export class NetworkManager implements AgentInterface {
 
 	// Call this when we get a mic or change tracks
 	evaluateRenegotiation() {
-		// Just trigger a proximity check immediately
+		// 1. Add tracks to all existing peers
+		this.peers.forEach((pc, peerId) => {
+			if (this.myStream) {
+				const audioTracks = this.myStream.getAudioTracks();
+				if (audioTracks.length > 0) {
+					// Check if track already exists
+					const senders = pc.getSenders();
+					const hasTrack = senders.some((s) => s.track?.id === audioTracks[0].id);
+
+					if (!hasTrack) {
+						// console.log(`[VoiceDebug] 🎙️ Adding late track to peer ${peerId}`);
+						audioTracks.forEach((track) => pc.addTrack(track, this.myStream!));
+
+						// Renegotiate (Create Offer)
+						pc.createOffer().then((offer) => {
+							pc.setLocalDescription(offer);
+							this.sendSignal(peerId, { sdp: offer });
+						});
+					}
+				}
+			}
+		});
+
+		// 2. Trigger proximity check for new connections
 		this.checkVoiceProximity();
 	}
 

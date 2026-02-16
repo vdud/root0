@@ -21,7 +21,7 @@
 	const FULL_VOLUME_DIST = 2; // 100% volume within this distance
 
 	const songs = [
-		// '/speaker-songs/track-1-breadgang-like-a-bird.opus'
+		'/speaker-songs/track-1-breadgang-like-a-bird.opus'
 		// Add more songs here:
 		// '/speaker-songs/track2.opus',
 	];
