@@ -198,14 +198,7 @@
 	</div>
 {/if}
 
-<T.Group
-	bind:ref
-	dispose={false}
-	{...props}
-	position={[SPEAKER_POS.x, SPEAKER_POS.y, SPEAKER_POS.z]}
-	rotation={[0, -0.5, 0]}
-	scale={0.5}
->
+<T.Group bind:ref dispose={false} {...props}>
 	{#await gltf}
 		{@render fallback?.()}
 	{:then gltf}

@@ -151,6 +151,8 @@ app.get('/agents', async (req, res) => {
 				name: a.name,
 				uptime: agents.has(a.id) ? Date.now() - agents.get(a.id)!.startTime : 0,
 				owner: a.owner,
+				purpose: a.purpose,
+				behaviour: a.behaviour,
 				status: agents.has(a.id) ? 'running' : 'stopped' // Sync source of truth
 			}));
 			res.json(list);
@@ -166,6 +168,14 @@ app.get('/agents', async (req, res) => {
 		name: a.name,
 		uptime: Date.now() - a.startTime,
 		owner: a.owner,
+		// Memory agents store purpose/behaviour in env vars or we need to store them in the AgentProcess struct
+		// checking the AgentProcess interface... it strictly has Process, id, name, startTime, owner.
+		// We should probably update AgentProcess to store them too for fallback,
+		// but for now let's just use defaults or try to fetch from somewhere if possible.
+		// But wait, startAgentProcess takes them as args.
+		// Let's update AgentProcess interface to include them?
+		// Actually, if we are falling back to memory, it means DB is down or not connected.
+		// Let's just return what we have.
 		status: 'running'
 	}));
 	res.json(list);

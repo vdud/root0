@@ -240,6 +240,16 @@ export class HeadlessAgent {
 			moved = true; // If falling, we are moving
 		}
 
+		// Bounds Check / Respawn
+		if (this.position.y < -10) {
+			console.log('⚠️ Agent fell off world! Respawning at (0, 5, 0).');
+			this.position = { x: 0, y: 5, z: 0 };
+			this.velocity = { x: 0, y: 0, z: 0 };
+			this.targetPosition = null;
+			this.movement.forward = 0;
+			moved = true;
+		}
+
 		// Send update if moved or periodically (keep alive / sync)
 		if (moved || now % 500 < this.TICK_RATE) {
 			this.sendUpdate();
@@ -269,7 +279,18 @@ export class HeadlessAgent {
 
 			// CHECK PROXIMITY
 			const sender = this.otherPlayers.get(senderId);
-			if (sender) {
+
+			// Allow if:
+			// 1. It is a Direct Message (targetId match)
+			// 2. Sender is Owner (always hear owner)
+			// 3. Distance < 20m
+			const isDM = targetId === this.socket.id;
+			const isOwner =
+				sender?.walletAddress &&
+				this.owner &&
+				sender.walletAddress.toLowerCase() === this.owner.toLowerCase();
+
+			if (sender && !isDM && !isOwner) {
 				const dx = sender.x - this.position.x;
 				const dz = sender.z - this.position.z;
 				const dist = Math.sqrt(dx * dx + dz * dz);
@@ -343,16 +364,17 @@ export class HeadlessAgent {
 		this.targetPosition = { x, y: 0, z };
 	}
 
-	say(message: string) {
+	say(message: string, targetId?: string) {
 		if (!this.socket.id) return;
-		this.broadcastLog(`🗣️ Saying: "${message}"`);
+		this.broadcastLog(`🗣️ Saying${targetId ? ' (Privately)' : ''}: "${message}"`);
 		this.socket.send(
 			JSON.stringify({
 				type: 'chat-message',
 				id: randomUUID(),
 				senderId: this.socket.id,
 				text: message,
-				timestamp: Date.now()
+				timestamp: Date.now(),
+				targetId: targetId
 			})
 		);
 	}
@@ -431,7 +453,7 @@ export class HeadlessAgent {
 					distance: dist
 				};
 			})
-			.filter((o) => o.distance < 20); // Only see obstacles within 20m
+			.filter((o) => o.distance < 100); // Increased from 20m to 100m so agents can find distant objects
 
 		return {
 			self: selfState,

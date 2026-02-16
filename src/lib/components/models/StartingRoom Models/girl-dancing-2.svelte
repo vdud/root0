@@ -39,12 +39,7 @@ Title: EVE Nikke Suit
 	{#await gltf}
 		{@render fallback?.()}
 	{:then gltf}
-		<T.Group
-			name="Sketchfab_Scene"
-			scale={1.2}
-			position={[-2.4, 0, -8]}
-			rotation={[0, Math.PI / 4, 0]}
-		>
+		<T.Group name="Sketchfab_Scene" {...props}>
 			<T.Group name="Sketchfab_model" rotation={[-Math.PI / 2, 0, 0]}>
 				<T.Group name="EVE_Nikke_Suitfbx" rotation={[Math.PI / 2, 0, 0]} scale={0.01}>
 					<T.Group name="Object_2">

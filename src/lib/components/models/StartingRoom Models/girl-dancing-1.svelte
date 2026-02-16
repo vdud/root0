@@ -39,12 +39,7 @@ Title: Belly Dance
 	{#await gltf}
 		{@render fallback?.()}
 	{:then gltf}
-		<T.Group
-			name="Sketchfab_Scene"
-			scale={1.2}
-			position={[2, 0, -7]}
-			rotation={[0, -Math.PI / 4, 0]}
-		>
+		<T.Group name="Sketchfab_Scene" {...props}>
 			<T.Group name="Sketchfab_model" rotation={[-Math.PI / 2, 0, 0]} scale={0.91}>
 				<T.Group name="Belly_Dancefbx" rotation={[Math.PI / 2, 0, 0]} scale={0.01}>
 					<T.Group name="Object_2">

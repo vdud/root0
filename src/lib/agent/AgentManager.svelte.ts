@@ -34,7 +34,7 @@ class AgentManagerState {
 		if (browser) {
 			// console.log('AgentManager constructor');
 
-			this.loadFromStorage();
+			// REMOVED: this.loadFromStorage();
 			this.syncWithFleet(); // Restore state from server
 			this.startDiscovery();
 
@@ -96,7 +96,7 @@ class AgentManagerState {
 						// 	`[AgentLog] Updated Local Agent: ${updatedAgent.name} (Logs: ${updatedLogs.length})`
 						// );
 					} else {
-						console.warn(`[AgentLog] Received log for UNKNOWN agent ID: ${agentId}`);
+						// console.warn(`[AgentLog] Received log for UNKNOWN agent ID: ${agentId}`);
 					}
 				}
 			});
@@ -108,49 +108,32 @@ class AgentManagerState {
 			const res = await fetch(`${FLEET_URL}/agents`);
 			if (res.ok) {
 				const runningAgents: any[] = await res.json();
-				// runningAgents is [{ id, name, uptime, owner? }]
+				// console.log('[AgentManager] Syncing with fleet:', runningAgents);
+				// runningAgents is [{ id, name, uptime, owner?, status }]
 
 				const myAddress = web3.address?.toLowerCase();
 
-				// 1. Update status of known agents
-				this.agents.forEach((agent) => {
-					const remote = runningAgents.find((ra) => ra.id === agent.id);
-					agent.status = remote ? 'running' : 'stopped';
-				});
+				// 1. Rebuild local agents list from Fleet
+				const newAgentList: AgentConfig[] = [];
 
-				// 2. Manage Orphan/Unknown Agents
+				// 2. Manage Agents
 				runningAgents.forEach((ra) => {
-					// Rule: If owner is unknown, DELETE THEM.
-					if (!ra.owner) {
-						console.warn(
-							`[AgentManager] Found agent ${ra.name} with NO OWNER. Logging only (debug mode)...`
-						);
-						// this.stopAgent(ra.id, 'Agent has no owner (compliance check)');
-						return;
-					}
-
-					// 3. Adopt agents owned by me matches
+					// Rule: Only show agents owned by me
 					if (myAddress && ra.owner && ra.owner.toLowerCase() === myAddress) {
-						const exists = this.agents.some((a) => a.id === ra.id);
-						if (!exists) {
-							// console.log(`[AgentManager] Adopting orphan agent: ${ra.name}`);
-							this.addAgent({
-								id: ra.id,
-								name: ra.name,
-								purpose: 'Recovered from Fleet',
-								behaviour: 'Neutral',
-								status: 'running',
-								logs: []
-							});
-						} else {
-							// console.log(`[AgentManager] Agent ${ra.name} (${ra.id}) spans local and remote.`);
-						}
-					} else {
-						// console.log(
-						// 	`[AgentManager] Skipping agent ${ra.name} (${ra.id}). Owner Mismatch. My Address: ${myAddress} | Agent Owner: ${ra.owner}`
-						// );
+						// Preserve logs if agent already exists in local state
+						const existing = this.agents.find((a) => a.id === ra.id);
+						newAgentList.push({
+							id: ra.id,
+							name: ra.name || 'Unknown Agent',
+							purpose: ra.purpose || 'Unknown Purpose',
+							behaviour: ra.behaviour || 'Neutral',
+							status: ra.status || 'stopped',
+							logs: existing ? existing.logs : []
+						});
 					}
 				});
+
+				this.agents = newAgentList;
 			}
 		} catch (e) {
 			console.warn('Could not sync with Fleet Manager (is it running?)');
@@ -191,36 +174,30 @@ class AgentManagerState {
 		}, 2000);
 	}
 
-	private loadFromStorage() {
-		const stored = localStorage.getItem('root0_my_agents');
-		if (stored) {
-			try {
-				const parsed = JSON.parse(stored);
-				this.agents = parsed.map((a: AgentConfig) => ({ ...a, status: 'stopped', logs: [] }));
-			} catch (e) {
-				console.error('Failed to load agents', e);
-			}
-		} else {
-			this.addAgent({
-				name: 'Bunty',
-				purpose: 'To be a Guide',
-				behaviour: 'Rude yet sarcastic'
-			});
+	// REMOVED: loadFromStorage
+	// REMOVED: saveToStorage
+
+	async addAgent(config: Partial<AgentConfig>) {
+		if (!web3.address) {
+			console.error('Cannot create agent without wallet connection');
+			return;
 		}
-	}
 
-	private saveToStorage() {
-		if (!browser) return;
-		const toSave = this.agents.map(({ id, name, purpose, behaviour }) => ({
-			id,
-			name,
-			purpose,
-			behaviour
-		}));
-		localStorage.setItem('root0_my_agents', JSON.stringify(toSave));
-	}
+		// We don't just add to local array; we should probably ask the server to create/persist the definition
+		// But for now, since startAgent sends the config to the server and creates it in DB,
+		// we can just add a "pending" agent here.
+		// HOWEVER, since we rely on syncWithFleet, maybe we should just POST to start?
 
-	addAgent(config: Partial<AgentConfig>) {
+		// Actually, users might want to configure an agent before starting it.
+		// But the previous implementation just added it locally.
+		// To be persistent without running, we need a 'create' endpoint in Fleet to save to DB.
+
+		// For now, let's keep it simple: Adding an agent just creates it locally in memory
+		// until 'Start' is pressed, BUT we are removing local storage.
+		// So upon refresh, unstarted agents will disappear.
+		// Ideally we'd have a POST /agent/create endpoint.
+		// I will implement a temporary "add to list" so the UI works, but know it is ephemeral until started.
+
 		const newAgent: AgentConfig = {
 			id: config.id || crypto.randomUUID(),
 			name: config.name || 'New Agent',
@@ -230,13 +207,15 @@ class AgentManagerState {
 			logs: []
 		};
 		this.agents = [...this.agents, newAgent];
-		this.saveToStorage();
+
+		// If we want it to persist even if stopped, we should probably call start (or a create endpoint)
+		// But user asked to NOT auto-start.
 	}
 
 	removeAgent(id: string) {
 		this.stopAgent(id);
+		// Optimistic update
 		this.agents = this.agents.filter((a) => a.id !== id);
-		this.saveToStorage();
 	}
 
 	async startAgent(id: string) {
@@ -271,6 +250,8 @@ class AgentManagerState {
 			if (res.ok) {
 				this.agents[agentIndex].status = 'running';
 				this.addLog(id, '🚀 Launch command sent to Fleet.');
+				// Trigger sync to get official DB status
+				setTimeout(() => this.syncWithFleet(), 1000);
 			} else {
 				const err = await res.json();
 				this.addLog(id, `❌ Failed to start: ${err.error}`);
@@ -298,6 +279,7 @@ class AgentManagerState {
 			} else {
 				// console.log(`[AgentManager] Stopped remote/orphan agent ${id}`);
 			}
+			setTimeout(() => this.syncWithFleet(), 1000);
 		} catch (e) {
 			console.error('Stop error', e);
 		}
@@ -305,7 +287,8 @@ class AgentManagerState {
 
 	async hardResync() {
 		this.agents = [];
-		localStorage.removeItem('root0_my_agents');
+		// Local storage removal logic
+		if (browser) localStorage.removeItem('root0_my_agents');
 		await this.syncWithFleet();
 		// console.log('[AgentManager] Hard Resync Complete. Found:', this.agents.length, 'agents.');
 	}

@@ -23,22 +23,30 @@
 		// },
 		{
 			id: 'girl-dancing-1',
-			position: [5, 0, 5] as [number, number, number],
+			position: [-3, 0, -1] as [number, number, number],
+			rotation: [0, 2, 0] as [number, number, number],
+			scale: 1.2,
 			loader: () => import('./models/StartingRoom Models/girl-dancing-1.svelte')
 		},
 		{
 			id: 'girl-dancing-2',
-			position: [-2.4, 0, -8] as [number, number, number],
+			position: [-1, 0, 2] as [number, number, number],
+			rotation: [0, 1.57, 0] as [number, number, number],
+			scale: 1.1,
 			loader: () => import('./models/StartingRoom Models/girl-dancing-2.svelte')
 		},
 		{
 			id: 'car-1',
-			position: [10, 0, -5] as [number, number, number],
+			position: [0, 0, 6] as [number, number, number],
+			rotation: [0, 30, 0] as [number, number, number],
+			scale: 0.15,
 			loader: () => import('./models/StartingRoom Models/car-1.svelte')
 		},
 		{
 			id: 'low-poly-ground-speaker',
-			position: [-10, 0, -5] as [number, number, number],
+			position: [3, 0, 4] as [number, number, number],
+			rotation: [0, 10, 0] as [number, number, number],
+			scale: 0.5,
 			loader: () => import('./models/StartingRoom Models/low-poly-speakers.svelte')
 		}
 	];

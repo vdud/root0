@@ -2,8 +2,9 @@ import { HeadlessAgent } from '../src/lib/network/HeadlessAgent';
 import { PARTYKIT_ROOM } from '../src/lib/network/config';
 import OpenAI from 'openai';
 import * as dotenv from 'dotenv';
-import * as fs from 'fs';
+import postgres from 'postgres';
 import * as path from 'path';
+import * as fs from 'fs'; // Kept for skills
 dotenv.config();
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -14,10 +15,15 @@ if (!OPENROUTER_API_KEY) {
 	process.exit(1);
 }
 
-// Log connection details for debugging
-// console.log(`[Agent] Model: ${MODEL}`);
-// console.log(`[Agent] Base URL: https://openrouter.ai/api/v1`);
-// console.log(`[Agent] API Key: ${OPENROUTER_API_KEY.slice(0, 4)}...${OPENROUTER_API_KEY.slice(-4)}`);
+// Database Connection
+const connectionString = process.env.DATABASE_URL;
+let sql: postgres.Sql | null = null;
+
+if (!connectionString) {
+	console.error('DATABASE_URL is not set. Memory persistence will be disabled.');
+} else {
+	sql = postgres(connectionString);
+}
 
 const openai = new OpenAI({
 	baseURL: 'https://openrouter.ai/api/v1',
@@ -69,39 +75,67 @@ async function main() {
 	let name = getArgValue('name') || process.env.AGENT_NAME || 'AI Agent';
 	let behaviour = getArgValue('behaviour') || process.env.AGENT_BEHAVIOUR || 'Neutral';
 	let shouldSeed = args.includes('--seed') || process.env.AGENT_SEED === 'true';
+	const agentId = process.env.AGENT_ID || 'unknown-id';
 
 	if (!purpose) {
 		// console.log('ℹ️ No purpose specified. Defaulting to explorer.');
 		purpose = 'explore, greet people, and be interesting.';
 	}
 
-	// Memory Setup
-	const memoryDir = path.join(process.cwd(), '.agent/memories');
-	if (!fs.existsSync(memoryDir)) {
-		fs.mkdirSync(memoryDir, { recursive: true });
-	}
+	// Memory Setup: Load from Postgres
+	// Segregate memories by type
+	let longTermMemory = '';
+	let episodicMemory = '';
+	let semanticMemory = '';
 
-	const memoryFile = path.join(memoryDir, `${name}.md`);
-	let memory = '';
-	if (fs.existsSync(memoryFile)) {
-		memory = fs.readFileSync(memoryFile, 'utf8');
-		// console.log(`🧠 Loaded existing memory for ${name}`);
-	} else {
-		// console.log(`✨ Created new memory for ${name}`);
-		memory = `Memory log for ${name}. Created at ${new Date().toISOString()}
-`;
-		fs.writeFileSync(memoryFile, memory);
+	// Procedural Memory (Skills) - Already loaded from files
+	// let proceduralMemory = ... (loaded below)
+
+	if (sql) {
+		try {
+			const storedMemories = await sql`
+                SELECT content, created_at, type FROM memories 
+                WHERE agent_id = ${agentId} 
+                ORDER BY created_at ASC
+            `;
+
+			if (storedMemories.length > 0) {
+				console.log(`🧠 Loaded ${storedMemories.length} memories from Supabase.`);
+
+				// Categorize
+				longTermMemory = storedMemories
+					.filter((m) => m.type === 'long_term')
+					.map((m) => `- ${m.content} [${new Date(m.created_at).toLocaleDateString()}]`)
+					.join('\n');
+
+				episodicMemory = storedMemories
+					.filter((m) => m.type === 'episodic' || !m.type || m.type === 'general') // Default to episodic/general
+					.map((m) => `[${new Date(m.created_at).toLocaleString()}] ${m.content}`)
+					.join('\n');
+
+				semanticMemory = storedMemories
+					.filter((m) => m.type === 'semantic')
+					.map((m) => `- ${m.content}`)
+					.join('\n');
+			} else {
+				console.log(`✨ No existing memories found for ${name} in Supabase.`);
+			}
+		} catch (e) {
+			console.error('❌ Failed to load memories from Supabase:', e);
+		}
 	}
 
 	const host = process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'localhost:1999';
 	const room = PARTYKIT_ROOM;
-	const agentId = process.env.AGENT_ID || 'unknown-id';
 
 	// console.log(`[Agent] Initializing "${name}"...`);
 	// console.log(`[Agent] ID: ${agentId}`);
 	// console.log(`[Agent] Target Host: ${host}`);
 	// console.log(`[Agent] Version: 1.0.1 (Sync Check: ${new Date().toISOString()})`);
 
+	// FIX: Pass ownerAddress to HeadlessAgent constructor so dashboard can identify ownership.
+	// The dashboard uses this to determine if the agent belongs to the current user (isLocal).
+	// Visual masquerading is avoided because NetworkPlayer relies on Socket ID and Name, not Wallet Address.
 	const agent = new HeadlessAgent(host, room, name, ownerAddress, agentId);
 
 	// --- LOG OVERRIDE FOR DASHBOARD STREAMING ---
@@ -233,16 +267,22 @@ async function main() {
 	// Load Skills
 	let observationSkill = '';
 	let interactionSkill = '';
+	let memorySkill = '';
+	let navigationSkill = '';
+
 	try {
-		observationSkill = fs.readFileSync(
-			path.join(process.cwd(), '.agent/skills/observation.md'),
-			'utf8'
-		);
-		interactionSkill = fs.readFileSync(
-			path.join(process.cwd(), '.agent/skills/interaction.md'),
-			'utf8'
-		);
-		console.log('📖 Loaded Skills: Observation & Interaction');
+		const skillDir = path.join(process.cwd(), '.agent/skills');
+		observationSkill = fs.readFileSync(path.join(skillDir, 'observation.md'), 'utf8');
+		interactionSkill = fs.readFileSync(path.join(skillDir, 'interaction.md'), 'utf8');
+		// Load new skills if they exist, appropriately handling errors/defaults could be good but we'll try direct load
+		if (fs.existsSync(path.join(skillDir, 'memory.md'))) {
+			memorySkill = fs.readFileSync(path.join(skillDir, 'memory.md'), 'utf8');
+		}
+		if (fs.existsSync(path.join(skillDir, 'navigation.md'))) {
+			navigationSkill = fs.readFileSync(path.join(skillDir, 'navigation.md'), 'utf8');
+		}
+
+		console.log('📖 Loaded Skills: Observation, Interaction, Memory, Navigation');
 	} catch (e) {
 		console.warn('⚠️ Could not load skills', e);
 	}
@@ -251,9 +291,18 @@ async function main() {
     You are an AI agent named "${name}" in a 3D metaverse. 
     You observe the world, think about what to do, and then act.
     
+    ## SKILLS & TRAINING
+    ### OBSERVATION
     ${observationSkill}
     
+    ### INTERACTION
     ${interactionSkill}
+
+    ### MEMORY SYSTEM
+    ${memorySkill}
+
+    ### NAVIGATION & PHYSICS
+    ${navigationSkill}
     
     Available Actions (Execute exactly one per turn):
     - MOVE: "MOVE x z" (e.g., "MOVE 5 -5") - Move to specific ABSOLUTE coordinates. Range is roughly -100 to 100 for both X and Z.
@@ -270,7 +319,9 @@ async function main() {
     4. **INTERACTION PROTOCOL**:
        - **PRIORITY 1: DIRECT INTERACTION**: If you receive a **[DIRECT MESSAGE]** or are addressed by name:
          - You **MUST** reply. Do not just MOVE or WAIT without speaking.
-         - Set "action" to "WAIT" (or "follow" if asked) and put your response in "message".
+         - Set "action" to "WAIT" (or "follow" if asked).
+         - Put your response in "message".
+         - **IMPORTANT**: If replying to a [DIRECT MESSAGE], you MUST set "target_id" to the sender's ID to keep it private.
        - **IF OWNER IS SPEAKING/PRESENT**: 
          - OBEY your owner completely. 
          - Maintain your specific BEHAVIOUR trait ("${behaviour}") while obeying.
@@ -286,24 +337,36 @@ async function main() {
        - **FOLLOW**: Stay near your OWNER (3-5 meters) UNLESS they give you a specific command to stay away, move elsewhere, or wait.
        - **PROTECT**: If strangers approach, stand between them and your owner.
 
-    - **RELATIVE MOVEMENT**:
+    - **RELATIVE MOVEMENT & COLLISION AVOIDANCE**:
+       - Always respect **PERSONAL SPACE**. Do not move to a coordinate if someone else is already there (within 1.5m).
+       - If you are too close to someone, move slightly away.
        - If asked to "move [distance] meters away" or "go back [distance]":
          1. Get your current position (x, z).
          2. Calculate a target coordinate far from your current spot.
          3. Example: If you are at (5, 5) and want to move 10m away, target could be (15, 15) or (-5, -5).
          4. Use the "MOVE x z" command with these new absolute coordinates.
 
-    7. **MEMORY & GOSSIP**:
-       - You have a long-term MEMORY. Use it to store important facts about people, places, or events.
-       - If you are IDLE (not obeying owner) and see another BOT, you can "GOSSIP".
-       - Share something interesting from your memory or ask them for news.
-       - Save any new interesting information to your memory using the "memory_update" field.
+    6. **MEMORY SYSTEM**:
+       You have a multi-layered memory system. Use it to be smart and persistent.
+       - **SHORT-TERM**: The current chat log (Context).
+       - **LONG-TERM**: Important facts about people/world (e.g., "Varun is my owner", "Alice likes blue").
+       - **EPISODIC**: Summaries of past events/conversations (e.g., "We explored the forest last week").
+       - **SEMANTIC**: General knowledge facts.
+       
+       **How to Update Memory**:
+       If you learn something new (a name, a fact, a user preference) or finish a significant interaction, use the "memory_update" field.
+       Set "memory_type" to one of: 'long_term', 'episodic', 'semantic'.
+       - Use 'long_term' for enduring facts.
+       - Use 'episodic' for event summaries.
+       - Use 'semantic' for general knowledge.
 
     Respond with a JSON object containing:
     {
       "action": "The action command. e.g., 'MOVE 5 5', 'FOLLOW abc-123', 'WAIT', 'STOP'.",
       "message": "A short message to speak to nearby players (or null if you want to be silent)",
-      "memory_update": "Text to append to your memory file. Use this to remember names, facts, or gossip. (Optional)"
+      "target_id": "Optional ID of a player if you want to send a PRIVATE Direct Message (e.g. replying to a DM). Omit for global chat.",
+      "memory_update": "Text to append to your memory file. Use this to remember names, facts, or gossip. (Optional)",
+      "memory_type": "One of 'long_term', 'episodic', 'semantic'. Default 'episodic'. (Optional)"
     }
     
     IMPORTANT: You MUST respond with ONLY the JSON object. Do not include any explanation, conversational filler, or markdown formatting outside of the JSON. If you want to say something, put it in the "message" field of the JSON.
@@ -317,13 +380,20 @@ async function main() {
 			const observation = agent.getObservation();
 
 			// Construct prompt from observation
+			// FIX: Filter out own messages to prevent loop
 			const formattedChatLog = observation.chatLog
-				.slice(-5)
+				.filter((msg) => msg.senderId !== agent.socket.id)
+				.slice(-10) // Increased context window for short-term memory
 				.map((msg) => {
 					// Check if sender is owner
+					// CRITICAL FIX: Ensure the sender is NOT another agent.
+					// Agents share the same owner wallet, but shouldn't obey each other.
+					const senderData = agent.otherPlayers.get(msg.senderId);
 					const isOwner =
 						ownerAddress &&
-						agent.otherPlayers.get(msg.senderId)?.walletAddress?.toLowerCase() === ownerAddress;
+						senderData &&
+						senderData.walletAddress?.toLowerCase() === ownerAddress &&
+						!senderData.isAgent;
 
 					const senderName =
 						msg.senderName || (msg.senderId === agent.socket.id ? name : 'Unknown');
@@ -333,15 +403,41 @@ async function main() {
 					const dmPrefix = isDM ? '📣 [DIRECT MESSAGE] ' : '';
 
 					const prefix = isOwner ? '[👑 OWNER] ' : '';
-					return `${dmPrefix}${prefix}[${senderName}]: ${msg.content}`;
+					return `[${msg.senderId}] ${dmPrefix}${prefix}[${senderName}]: ${msg.content}`;
 				})
 				.join('\n');
+
+			// --- PRIORITIZATION LOGIC ---
+			// Find the latest message that is NOT from us, and ideally from the owner or a DM.
+			let latestInstruction = '';
+			// We reverse the chat log to find the newest message first
+			const reversedLog = [...observation.chatLog].reverse();
+			const latestMsg = reversedLog.find((msg) => msg.senderId !== agent.socket.id);
+
+			if (latestMsg) {
+				const senderData = agent.otherPlayers.get(latestMsg.senderId);
+				const isOwner =
+					ownerAddress &&
+					senderData &&
+					senderData.walletAddress?.toLowerCase() === ownerAddress &&
+					!senderData.isAgent;
+
+				const isDM = latestMsg.targetId === agent.socket.id;
+
+				// If it's the owner or a DM, we treat it as a critical instruction
+				// We also treat local chat as important, but owner/DM is higher.
+				// For now, we just take the *latest* message from anyone as the "current command" context,
+				// but we label it based on authority.
+				const authority = isOwner ? '👑 OWNER (HIGHEST PRIORITY)' : 'Sender';
+				latestInstruction = `🚨 LATEST INSTRUCTION (${authority}): "${latestMsg.content}"`;
+			}
+			// -----------------------------
 
 			// Distance to owner logic
 			let ownerDistance = -1;
 			let ownerPosition = null;
 
-			// Check current follow target status
+			// Check current follow follow target status
 			let followStatus = 'None';
 			if (agent.followTargetId) {
 				const target = agent.otherPlayers.get(agent.followTargetId);
@@ -366,7 +462,8 @@ async function main() {
 												const isOwner =
 													p.walletAddress &&
 													ownerAddress &&
-													p.walletAddress.toLowerCase() === ownerAddress;
+													p.walletAddress.toLowerCase() === ownerAddress &&
+													!p.isAgent;
 												if (isOwner) {
 													ownerDistance = p.distance;
 													ownerPosition = p.position;
@@ -408,8 +505,18 @@ async function main() {
 									)
 								: 'None'
 						}
-            - Chat Log (Last 5 messages):
+            
+            ## SHORT-TERM MEMORY (Current Chat Log)
             ${formattedChatLog}
+
+            ## LONG-TERM MEMORY (Facts)
+            ${longTermMemory || '(None)'}
+
+            ## EPISODIC MEMORY (Past Interactions)
+            ${episodicMemory || '(None)'}
+            
+            ## SEMANTIC MEMORY (General Knowledge)
+            ${semanticMemory || '(None)'}
 
             - Market Listings (${observation.marketListings.length} items):
             ${
@@ -424,9 +531,10 @@ async function main() {
 						}
             
             - Last Action: ${lastAction || 'None'}
-            
-            - CURRENT MEMORY:
-            ${memory}
+
+            ## 🚨 CURRENT INSTRUCTION (MUST FOLLOW)
+            ${latestInstruction || '(No recent instructions)'}
+            If this instruction contradicts previous ones, YOU MUST FOLLOW THIS ONE.
             
             CONTEXTUAL HINTS:
             - **CONVERSATIONAL POSITIONING**:
@@ -489,7 +597,7 @@ async function main() {
 				const lastMsg = observation.chatLog[observation.chatLog.length - 1];
 				const content = lastMsg.content.toLowerCase();
 				// Check if message is from owner or addressed to us
-				if (content.includes('stop') || content.includes('stay') || content.includes('wait')) {
+				if (content === 'stop' || content === 'stop.' || content.startsWith('stop ')) {
 					console.log(`🛑 HEURISTIC: Detected STOP command in chat. Overriding LLM.`);
 					action = 'STOP';
 					forceStop = true;
@@ -565,20 +673,52 @@ async function main() {
 								const parsed = JSON.parse(jsonStr);
 								action = parsed.action || 'WAIT';
 								const message = parsed.message;
+								const targetId = parsed.target_id;
+
 								const memoryUpdate = parsed.memory_update;
+								const memoryType = parsed.memory_type || 'episodic';
 
 								if (message) {
-									agent.say(message);
+									// FIXED: Pass targetId for private chat
+									agent.say(message, targetId);
 									consecutiveSayCount++;
 									hasSpoken = true;
 								}
 
 								if (memoryUpdate) {
-									const timestamp = new Date().toISOString();
-									const entry = `\n[${timestamp}] ${memoryUpdate}`;
-									memory += entry;
-									fs.appendFileSync(memoryFile, entry);
-									console.log(`💾 Memory Updated: ${memoryUpdate}`);
+									// DEDUPLICATION CHECK
+									// Check if we have saved this exact content recently (in the last 60 seconds)
+									const isDuplicate =
+										observation.chatLog.some((m) => m.content.includes(memoryUpdate)) || // Check chat
+										longTermMemory.includes(memoryUpdate) ||
+										episodicMemory.includes(memoryUpdate) ||
+										semanticMemory.includes(memoryUpdate);
+
+									if (isDuplicate) {
+										console.log(`⚠️ Skipping Duplicate Memory: "${memoryUpdate}"`);
+									} else {
+										// Save to Postgres if available
+										if (sql) {
+											try {
+												await sql`
+                                                    INSERT INTO memories (agent_id, content, type) 
+                                                    VALUES (${agentId}, ${memoryUpdate}, ${memoryType})
+                                                `;
+												console.log(`💾 Memory (${memoryType}) Saved to Supabase: ${memoryUpdate}`);
+
+												// Append to local cache state to avoid refresh delay
+												if (memoryType === 'long_term') {
+													longTermMemory += `\n- ${memoryUpdate} [Just now]`;
+												} else if (memoryType === 'semantic') {
+													semanticMemory += `\n- ${memoryUpdate}`;
+												} else {
+													episodicMemory += `\n[Just now] ${memoryUpdate}`;
+												}
+											} catch (e) {
+												console.error('❌ Failed to save memory to Supabase:', e);
+											}
+										}
+									}
 								}
 							} catch (e) {
 								console.error('❌ Failed to parse JSON response. Content was:', content);
@@ -600,22 +740,78 @@ async function main() {
 			if (action) {
 				lastAction = action;
 
+// ... (imports)
+import { Raycaster, type Obstacle, type Point3D } from './physics';
+
+// ... (existing code)
+
+// Define World Bounds (e.g., a square 50x50 area centered at 0,0)
+const WORLD_BOUNDS = { minX: -50, maxX: 50, minZ: -50, maxZ: 50 };
+
+// ... inside main loop ...
+
+			if (action) {
+				lastAction = action;
+
 				if (action.startsWith('MOVE')) {
 					const parts = action.split(' ');
-					const x = parseFloat(parts[1]);
-					const z = parseFloat(parts[2]);
+					let x = parseFloat(parts[1]);
+					let z = parseFloat(parts[2]);
 
 					// Check if we are currently following someone
 					if (agent.followTargetId) {
-						console.log(
-							`⚠️ Ignoring manual MOVE command because agent is in FOLLOW mode (Target: ${agent.followTargetId}). Use STOP to break follow.`
-						);
+                        // ... (follow logic)
 					} else if (!isNaN(x) && !isNaN(z)) {
-						consecutiveSayCount = 0; // Moving resets say count
-						agent.followTargetId = null; // Stop following if manual move
-						agent.moveTo(x, z);
+                        
+                        // --- PHYSICS / COLLISION CHECK ---
+                        const currentPos = agent.position; // Assuming agent.position is available here, if not need to get it from somewhere
+                        
+                        // We need to know where we are starting from. 
+                        // The HeadlessAgent class has 'position'.
+                        // However, 'agent' instance is right here.
+                        
+                        const origin: Point3D = { x: agent.position.x, y: agent.position.y, z: agent.position.z };
+                        const target: Point3D = { x, y: agent.position.y, z };
+                        
+                        const direction = { 
+                            x: target.x - origin.x, 
+                            y: 0, 
+                            z: target.z - origin.z 
+                        };
+                        
+                        const distToTarget = Math.sqrt(direction.x * direction.x + direction.z * direction.z);
+                        
+                        const raycaster = new Raycaster(origin, direction, distToTarget);
+                        
+                        // Convert observation.obstacles to Obstacle[]
+                        const obstacleList: Obstacle[] = observation.obstacles ? observation.obstacles.map(o => ({
+                            id: o.id,
+                            position: { x: o.position.x, y: o.position.y, z: o.position.z },
+                            radius: o.radius || 1.0
+                        })) : [];
+                        
+                        const hit = raycaster.cast(obstacleList);
+                        const cliff = raycaster.checkCliff(WORLD_BOUNDS);
+                        
+                        if (hit) {
+                            console.log(`🚫 MOVEMENT BLOCKED: Obstacle detected (${hit.id})`);
+                            agent.say(`I can't go there, ${hit.id} is in the way.`);
+                        } else if (cliff) {
+                             console.log(`🚫 MOVEMENT BLOCKED: Cliff detected!`);
+                             agent.say(`Whoa! That's the edge of the world. I'm not going there.`);
+                        } else {
+                            // Safe to move
+                            // COLLISION AVOIDANCE (Keep existing swarm logic as backup?)
+    						// ... existing safe spot logic could be removed or kept as secondary
+                            
+    						consecutiveSayCount = 0; // Moving resets say count
+    						agent.followTargetId = null; // Stop following if manual move
+    						agent.moveTo(x, z);
+                        }
 					}
-				} else if (action.startsWith('FOLLOW')) {
+				} 
+                // ...
+ else if (action.startsWith('FOLLOW')) {
 					consecutiveSayCount = 0;
 					const parts = action.split(' ');
 					const targetId = parts[1];

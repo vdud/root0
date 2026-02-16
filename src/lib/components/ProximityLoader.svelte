@@ -10,6 +10,7 @@
 		position: [number, number, number];
 		loader: () => Promise<any>;
 		priority?: number;
+		[key: string]: any; // Allow other props like rotation, scale
 	}
 
 	const {
@@ -152,7 +153,8 @@
 	{:else if item.state === 'loaded' && item.component}
 		<!-- Use T.Group wrapper for opacity fade-in effect -->
 		<T.Group>
-			<svelte:component this={item.component} />
+			{@const { id, loader, priority, ...restProps } = config || {}}
+			<svelte:component this={item.component} {...restProps} />
 		</T.Group>
 	{/if}
 {/each}

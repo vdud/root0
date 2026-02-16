@@ -51,7 +51,7 @@ docker pull 428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
 #   428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
 
 
-  docker run -d --name agent-fleet -p 3000:3000 --restart always -e OPENROUTER_API_KEY="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" -e NEXT_PUBLIC_PARTYKIT_HOST="root0-server.vdud.partykit.dev" 428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
+  docker run -d --name agent-fleet -p 3000:3000 --restart always -e OPENROUTER_API_KEY="..." -e NEXT_PUBLIC_PARTYKIT_HOST="root0-server.vdud.partykit.dev" 428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
 ```
 
 ```bash

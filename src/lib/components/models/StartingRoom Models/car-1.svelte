@@ -25,36 +25,42 @@ Title: Cartoon Car
 		{@render fallback?.()}
 	{:then gltf}
 		<AutoColliders shape="convexHull">
-			<T.Group scale={0.02} position={[0, 0, -10]} rotation={[0, 6, 0]}>
+			<T.Group {...props}>
 				<T.Group rotation={[-Math.PI / 2, 0, 0]} scale={[0.5, 0.54, 0.55]}>
 					<T.Mesh
 						geometry={gltf.nodes.Lamborghini_Aventador_Body__Lamborghini_AventadorLam_0.geometry}
 						material={gltf.materials.Lamborghini_AventadorLam}
+						castShadow
 					/>
 					<T.Mesh
 						geometry={gltf.nodes.Lamborghini_Aventador_Glass__Lamborghini_AventadorLam001_0
 							.geometry}
 						material={gltf.materials['Lamborghini_AventadorLam.001']}
+						castShadow
 					/>
 					<T.Mesh
 						geometry={gltf.nodes.Lamborghini_Aventador_Wheel_FL__Lamborghini_AventadorLam_0
 							.geometry}
 						material={gltf.materials.Lamborghini_AventadorLam}
+						castShadow
 					/>
 					<T.Mesh
 						geometry={gltf.nodes.Lamborghini_Aventador_Wheel_FR__Lamborghini_AventadorLam_0
 							.geometry}
 						material={gltf.materials.Lamborghini_AventadorLam}
+						castShadow
 					/>
 					<T.Mesh
 						geometry={gltf.nodes.Lamborghini_Aventador_Wheel_RL__Lamborghini_AventadorLam_0
 							.geometry}
 						material={gltf.materials.Lamborghini_AventadorLam}
+						castShadow
 					/>
 					<T.Mesh
 						geometry={gltf.nodes.Lamborghini_Aventador_Wheel_RR__Lamborghini_AventadorLam_0
 							.geometry}
 						material={gltf.materials.Lamborghini_AventadorLam}
+						castShadow
 					/>
 				</T.Group>
 			</T.Group>
