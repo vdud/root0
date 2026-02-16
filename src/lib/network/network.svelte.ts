@@ -355,9 +355,9 @@ export class NetworkManager implements AgentInterface {
 			if (this.peers.has(player.id)) {
 				// We are currently connected
 				if (dist > this.VOICE_DISCONNECT_DISTANCE) {
-					// console.log(
-					// 	`[VoiceDebug] 🔇 ${player.id} LEFT range (${dist.toFixed(1)}m > ${this.VOICE_DISCONNECT_DISTANCE}m). Disconnecting...`
-					// );
+					console.log(
+						`[VoiceDebug] 🔇 ${player.id} LEFT range (${dist.toFixed(1)}m > ${this.VOICE_DISCONNECT_DISTANCE}m). Disconnecting...`
+					);
 					this.cleanupPeer(player.id);
 				}
 			} else {
@@ -365,13 +365,15 @@ export class NetworkManager implements AgentInterface {
 				if (dist <= this.VOICE_CONNECT_DISTANCE) {
 					// Connect if we are the dominant ID (to avoid glare/collision)
 					if (this.socket.id > player.id) {
-						// console.log(
-						// 	`[VoiceDebug] 🔊 ${player.id} ENTERED range (${dist.toFixed(1)}m <= ${this.VOICE_CONNECT_DISTANCE}m). Initiating Connection...`
-						// );
+						console.log(
+							`[VoiceDebug] 🔊 ${player.id} ENTERED range (${dist.toFixed(1)}m <= ${this.VOICE_CONNECT_DISTANCE}m). Initiating Connection...`
+						);
 						this.createPeer(player.id, true);
 					} else {
 						// We wait for them to connect to us
-						// console.log(`[VoiceDebug] ⏳ ${player.id} in range (${dist.toFixed(1)}m). Waiting for offer...`);
+						console.log(
+							`[VoiceDebug] ⏳ ${player.id} in range (${dist.toFixed(1)}m). Waiting for offer...`
+						);
 					}
 				}
 			}
@@ -379,7 +381,7 @@ export class NetworkManager implements AgentInterface {
 	}
 
 	cleanupPeer(targetId: string) {
-		// console.log(`[VoiceDebug] 🧹 Cleaning up peer ${targetId}`);
+		console.log(`[VoiceDebug] 🧹 Cleaning up peer ${targetId}`);
 		if (this.peers.has(targetId)) {
 			this.peers.get(targetId)?.close();
 			this.peers.delete(targetId);
@@ -388,7 +390,7 @@ export class NetworkManager implements AgentInterface {
 			const stream = this.voiceStreams.get(targetId);
 			if (stream) {
 				stream.getTracks().forEach((track) => {
-					// console.log(`[VoiceDebug] 🛑 Stopping track for ${targetId}:`, track.kind);
+					console.log(`[VoiceDebug] 🛑 Stopping track for ${targetId}:`, track.kind);
 					track.stop();
 				});
 			}
@@ -424,7 +426,7 @@ export class NetworkManager implements AgentInterface {
 					const hasTrack = senders.some((s) => s.track?.id === audioTracks[0].id);
 
 					if (!hasTrack) {
-						// console.log(`[VoiceDebug] 🎙️ Adding late track to peer ${peerId}`);
+						console.log(`[VoiceDebug] 🎙️ Adding late track to peer ${peerId}`);
 						audioTracks.forEach((track) => pc.addTrack(track, this.myStream!));
 
 						// Renegotiate (Create Offer)
@@ -446,6 +448,8 @@ export class NetworkManager implements AgentInterface {
 		if (this.peers.has(targetId)) return;
 		// if (!this.myStream) return; // Allow Receive-Only if mic not ready yet
 
+		console.log(`[VoiceDebug] 🆕 Creating Peer for ${targetId} (Initiator: ${initiator})`);
+
 		const pc = new RTCPeerConnection({
 			iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
 		});
@@ -453,7 +457,7 @@ export class NetworkManager implements AgentInterface {
 		// Monitor connection state
 		pc.onconnectionstatechange = () => {
 			const state = pc.connectionState;
-			// console.log(`[VoiceDebug] 📡 Peer ${targetId} connection state:`, state);
+			console.log(`[VoiceDebug] 📡 Peer ${targetId} connection state:`, state);
 			if (state === 'failed' || state === 'disconnected' || state === 'closed') {
 				// Peer died. Attempt restart if we are the initiator or if it stays dead.
 				// Simple strategy: Just try to restart after a delay.
@@ -468,7 +472,7 @@ export class NetworkManager implements AgentInterface {
 
 		pc.oniceconnectionstatechange = () => {
 			const state = pc.iceConnectionState;
-			// console.log(`[VoiceDebug] ❄️ Peer ${targetId} ICE state:`, state);
+			console.log(`[VoiceDebug] ❄️ Peer ${targetId} ICE state:`, state);
 			if (state === 'failed' || state === 'disconnected') {
 				// ICE failed.
 				setTimeout(() => {
@@ -482,11 +486,15 @@ export class NetworkManager implements AgentInterface {
 
 		// Add my mic track if available
 		if (this.myStream) {
-			this.myStream.getTracks().forEach((track) => pc.addTrack(track, this.myStream!));
+			this.myStream.getTracks().forEach((track) => {
+				console.log(`[VoiceDebug] ➕ Adding local track to ${targetId}`);
+				pc.addTrack(track, this.myStream!);
+			});
 		}
 
 		// Handle incoming tracks
 		pc.ontrack = (event) => {
+			console.log(`[VoiceDebug] 👂 Received track from ${targetId}:`, event.streams[0].id);
 			this.voiceStreams.set(targetId, event.streams[0]);
 			this.voiceStreams = new Map(this.voiceStreams);
 		};
@@ -517,6 +525,7 @@ export class NetworkManager implements AgentInterface {
 				console.warn(`Ignoring zombie answer from ${senderId}`);
 				return;
 			}
+			console.log(`[VoiceDebug] 📨 Received signal from unknown peer ${senderId}. Creating...`);
 			this.createPeer(senderId, false);
 		}
 
@@ -535,11 +544,12 @@ export class NetworkManager implements AgentInterface {
 				// For now, let's just proceed and let WebRTC roll-back if needed.
 
 				await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+				console.log(`[VoiceDebug] ✅ Set Remote Description (${signal.sdp.type}) for ${senderId}`);
 
 				// FLUSH ICE QUEUE
 				if (this.iceQueues.has(senderId)) {
 					const queue = this.iceQueues.get(senderId)!;
-					// console.log(`[VoiceDebug] 🧊 Flushing ${queue.length} ICE candidates for ${senderId}`);
+					console.log(`[VoiceDebug] 🧊 Flushing ${queue.length} ICE candidates for ${senderId}`);
 					for (const candidate of queue) {
 						await pc.addIceCandidate(candidate);
 					}
@@ -550,6 +560,7 @@ export class NetworkManager implements AgentInterface {
 				if (this.myStream) {
 					const senders = pc.getSenders();
 					if (senders.length === 0) {
+						console.log(`[VoiceDebug] ➕ Adding local track to ${senderId} (response)`);
 						this.myStream.getTracks().forEach((track) => pc.addTrack(track, this.myStream!));
 					}
 				}

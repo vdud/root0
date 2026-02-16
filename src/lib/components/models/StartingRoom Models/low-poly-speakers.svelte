@@ -8,13 +8,15 @@
 
 	let { fallback, error, children, ref = $bindable(), ...props } = $props();
 
+	console.log('speaker props', props);
+
 	const dracoLoader = useDraco();
 	const gltf = useGltf('models/world-assets/low-poly-ground-speakers-transformed.glb', {
 		dracoLoader
 	});
 
 	// Speaker position (world coordinates) - adjusted to center of speaker wall
-	const SPEAKER_POS = new Vector3(2, 0, -10);
+	const SPEAKER_POS = new Vector3(3, 0, 4);
 
 	// Audio zones
 	const MAX_DISTANCE = 10; // Completely silent beyond this
