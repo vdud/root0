@@ -168,13 +168,10 @@ export default class Server implements Party.Server {
 					})
 				);
 			}
-			this.room.broadcast(
-				JSON.stringify({
-					type: 'voice-ready',
-					id: sender.id
-				}),
-				[sender.id]
-			);
+			// We do NOT broadcast 'voice-ready' here anymore.
+			// That was the bug causing connection loops/resets.
+			// The original 'voice-ready' broadcast should only happen
+			// when a user initially joins or explicitly enables mic.
 		} else if (data.type === 'object-place') {
 			// console.log(`Object placed: ${data.object.id}`);
 			this.worldObjects.set(data.object.id, data.object);

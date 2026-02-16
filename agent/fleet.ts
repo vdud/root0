@@ -58,7 +58,7 @@ const startAgentProcess = async (
 	updateDB = true
 ) => {
 	if (agents.has(id)) {
-		console.log(`[Fleet] Agent ${name} (${id}) is already running.`);
+		// console.log(`[Fleet] Agent ${name} (${id}) is already running.`);
 		return;
 	}
 
@@ -121,12 +121,12 @@ const startAgentProcess = async (
 const restoreAgents = async () => {
 	if (!sql) return;
 	try {
-		console.log('[Fleet] Checking for agents to restore...');
+		// console.log('[Fleet] Checking for agents to restore...');
 		const agentsToRestore = await sql`SELECT * FROM agents WHERE status = 'running'`;
-		console.log(`[Fleet] Found ${agentsToRestore.length} agents to restore.`);
+		// console.log(`[Fleet] Found ${agentsToRestore.length} agents to restore.`);
 
 		for (const agent of agentsToRestore) {
-			console.log(`[Fleet] Restoring agent: ${agent.name} (${agent.id})`);
+			// console.log(`[Fleet] Restoring agent: ${agent.name} (${agent.id})`);
 			await startAgentProcess(
 				agent.id,
 				agent.name,
@@ -222,7 +222,7 @@ app.post('/agent/stop', async (req, res) => {
 });
 
 app.listen(PORT, async () => {
-	console.log(`🚀 Agent Fleet Manager running on port ${PORT}`);
-	console.log(`[Fleet] Watching for agents...`);
+	// console.log(`🚀 Agent Fleet Manager running on port ${PORT}`);
+	// console.log(`[Fleet] Watching for agents...`);
 	await restoreAgents();
 });
