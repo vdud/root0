@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PRO TIP: We removed the 'partykit' service because you are running 'npx partykit dev' on your host machine.
   # This setup makes the Dockerized Agent talk to your LOCAL PartyKit server so you can see it!

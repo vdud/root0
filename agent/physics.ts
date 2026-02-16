@@ -53,7 +53,17 @@ export class Raycaster {
 			let cx = this.origin.x + this.direction.x * t;
 			let cz = this.origin.z + this.direction.z * t;
 
-			// If the projection is behind the ray, clamp to origin
+			// Check distance from origin to obstacle center
+			const distToCenterSq = tox * tox + toz * toz;
+			const collisionRadius = obs.radius + 0.2;
+
+			// If we are already inside the collision radius, ignore this obstacle
+			// This allows the agent to move out if it gets stuck inside/too close
+			if (distToCenterSq < collisionRadius * collisionRadius) {
+				continue;
+			}
+
+			// If the projection is behind the ray (t < 0), we ignore it.
 			if (t < 0) {
 				cx = this.origin.x;
 				cz = this.origin.z;
@@ -70,8 +80,8 @@ export class Raycaster {
 			const distSq = dx * dx + dz * dz;
 
 			// Check if within radius
-			// We add a small buffer (0.5m) to the radius for agent body size
-			const radius = obs.radius + 0.5;
+			// We add a small buffer (0.2m) to the radius for agent body size
+			const radius = obs.radius + 0.2;
 
 			if (distSq < radius * radius) {
 				// Collision detected!

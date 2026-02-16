@@ -5,7 +5,12 @@ import * as dotenv from 'dotenv';
 import postgres from 'postgres';
 import * as path from 'path';
 import * as fs from 'fs'; // Kept for skills
+import { Raycaster, type Obstacle, type Point3D } from './physics'; // Moved to top
+
 dotenv.config();
+
+// Define World Bounds (e.g., a square 50x50 area centered at 0,0)
+const WORLD_BOUNDS = { minX: -50, maxX: 50, minZ: -50, maxZ: 50 };
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const MODEL = 'arcee-ai/trinity-large-preview:free';
@@ -441,9 +446,15 @@ async function main() {
 			let followStatus = 'None';
 			if (agent.followTargetId) {
 				const target = agent.otherPlayers.get(agent.followTargetId);
-				followStatus = target
-					? `Following ${target.name} (${agent.followTargetId})`
-					: 'Target lost';
+				if (!target) {
+					// Target lost logic
+					console.log(`⚠️ Follow target ${agent.followTargetId} lost. Auto-stopping.`);
+					agent.followTargetId = null;
+					agent.say("I can't see who I was following anymore.");
+					followStatus = 'Target lost (Auto-stopped)';
+				} else {
+					followStatus = `Following ${target.name} (${agent.followTargetId})`;
+				}
 			}
 
 			const userPrompt = `
@@ -740,19 +751,6 @@ async function main() {
 			if (action) {
 				lastAction = action;
 
-// ... (imports)
-import { Raycaster, type Obstacle, type Point3D } from './physics';
-
-// ... (existing code)
-
-// Define World Bounds (e.g., a square 50x50 area centered at 0,0)
-const WORLD_BOUNDS = { minX: -50, maxX: 50, minZ: -50, maxZ: 50 };
-
-// ... inside main loop ...
-
-			if (action) {
-				lastAction = action;
-
 				if (action.startsWith('MOVE')) {
 					const parts = action.split(' ');
 					let x = parseFloat(parts[1]);
@@ -760,58 +758,120 @@ const WORLD_BOUNDS = { minX: -50, maxX: 50, minZ: -50, maxZ: 50 };
 
 					// Check if we are currently following someone
 					if (agent.followTargetId) {
-                        // ... (follow logic)
+						// ... (follow logic)
 					} else if (!isNaN(x) && !isNaN(z)) {
-                        
-                        // --- PHYSICS / COLLISION CHECK ---
-                        const currentPos = agent.position; // Assuming agent.position is available here, if not need to get it from somewhere
-                        
-                        // We need to know where we are starting from. 
-                        // The HeadlessAgent class has 'position'.
-                        // However, 'agent' instance is right here.
-                        
-                        const origin: Point3D = { x: agent.position.x, y: agent.position.y, z: agent.position.z };
-                        const target: Point3D = { x, y: agent.position.y, z };
-                        
-                        const direction = { 
-                            x: target.x - origin.x, 
-                            y: 0, 
-                            z: target.z - origin.z 
-                        };
-                        
-                        const distToTarget = Math.sqrt(direction.x * direction.x + direction.z * direction.z);
-                        
-                        const raycaster = new Raycaster(origin, direction, distToTarget);
-                        
-                        // Convert observation.obstacles to Obstacle[]
-                        const obstacleList: Obstacle[] = observation.obstacles ? observation.obstacles.map(o => ({
-                            id: o.id,
-                            position: { x: o.position.x, y: o.position.y, z: o.position.z },
-                            radius: o.radius || 1.0
-                        })) : [];
-                        
-                        const hit = raycaster.cast(obstacleList);
-                        const cliff = raycaster.checkCliff(WORLD_BOUNDS);
-                        
-                        if (hit) {
-                            console.log(`🚫 MOVEMENT BLOCKED: Obstacle detected (${hit.id})`);
-                            agent.say(`I can't go there, ${hit.id} is in the way.`);
-                        } else if (cliff) {
-                             console.log(`🚫 MOVEMENT BLOCKED: Cliff detected!`);
-                             agent.say(`Whoa! That's the edge of the world. I'm not going there.`);
-                        } else {
-                            // Safe to move
-                            // COLLISION AVOIDANCE (Keep existing swarm logic as backup?)
-    						// ... existing safe spot logic could be removed or kept as secondary
-                            
-    						consecutiveSayCount = 0; // Moving resets say count
-    						agent.followTargetId = null; // Stop following if manual move
-    						agent.moveTo(x, z);
-                        }
+						// --- PHYSICS / COLLISION CHECK ---
+						const currentPos = agent.position; // Assuming agent.position is available here, if not need to get it from somewhere
+
+						// We need to know where we are starting from.
+						// The HeadlessAgent class has 'position'.
+						// However, 'agent' instance is right here.
+
+						const origin: Point3D = {
+							x: agent.position.x,
+							y: agent.position.y,
+							z: agent.position.z
+						};
+						const target: Point3D = { x, y: agent.position.y, z };
+
+						const direction = {
+							x: target.x - origin.x,
+							y: 0,
+							z: target.z - origin.z
+						};
+
+						const distToTarget = Math.sqrt(direction.x * direction.x + direction.z * direction.z);
+
+						const raycaster = new Raycaster(origin, direction, distToTarget);
+
+						// Convert observation.obstacles to Obstacle[]
+						const obstacleList: Obstacle[] = observation.obstacles
+							? observation.obstacles.map((o) => ({
+									id: o.id,
+									position: { x: o.position.x, y: o.position.y, z: o.position.z },
+									radius: o.radius || 1.0
+								}))
+							: [];
+
+						const hit = raycaster.cast(obstacleList);
+						const cliff = raycaster.checkCliff(WORLD_BOUNDS);
+
+						if (hit) {
+							console.log(`🚫 MOVEMENT BLOCKED: Obstacle detected (${hit.id})`);
+
+							// ATTEMPT TO FIND A PATH AROUND
+							console.log('🔄 Attempting to find a path around...');
+
+							// Angles to check: +/- 45 degrees, +/- 90 degrees
+							// We want to find a vector that is clear for a short distance (e.g., 3 meters)
+							const angles = [Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2];
+							let foundDetour = false;
+
+							// Normalize original direction
+							const len = Math.sqrt(direction.x * direction.x + direction.z * direction.z);
+							const dirNorm = { x: direction.x / len, z: direction.z / len };
+
+							for (const angle of angles) {
+								// Rotate direction
+								const cos = Math.cos(angle);
+								const sin = Math.sin(angle);
+
+								// 2D Rotation: x' = x cos - z sin, z' = x sin + z cos
+								const detourDir = {
+									x: dirNorm.x * cos - dirNorm.z * sin,
+									y: 0,
+									z: dirNorm.x * sin + dirNorm.z * cos
+								};
+
+								const detourDist = 3.0; // Move 3 meters in the detour direction
+								const detourRay = new Raycaster(origin, detourDir, detourDist);
+
+								// Check if this direction is clear
+								const detourHit = detourRay.cast(obstacleList);
+								const detourCliff = detourRay.checkCliff(WORLD_BOUNDS);
+
+								if (!detourHit && !detourCliff) {
+									console.log(
+										`✨ Found clear path at angle ${((angle * 180) / Math.PI).toFixed(0)} degrees!`
+									);
+
+									// Calculate new target
+									const detourTargetX = origin.x + detourDir.x * detourDist;
+									const detourTargetZ = origin.z + detourDir.z * detourDist;
+
+									// Execute the detour
+									agent.moveTo(detourTargetX, detourTargetZ);
+
+									// Announce it (optional, but good for debugging/immersion)
+									if (!hasSpoken) {
+										agent.say(`Checking my bearings to go around ${hit.id}...`);
+										hasSpoken = true;
+									}
+
+									consecutiveSayCount = 0;
+									agent.followTargetId = null; // Stop following if manual move
+									foundDetour = true;
+									break; // Stop checking angles
+								}
+							}
+
+							if (!foundDetour) {
+								console.log('❌ No clear path found around obstacle. Stopping.');
+								if (!hasSpoken) {
+									agent.say(`I can't go there, ${hit.id} is in the way.`);
+								}
+							}
+						} else if (cliff) {
+							console.log(`🚫 MOVEMENT BLOCKED: Cliff detected!`);
+							agent.say(`Whoa! That's the edge of the world. I'm not going there.`);
+						} else {
+							// Safe to move
+							consecutiveSayCount = 0; // Moving resets say count
+							agent.followTargetId = null; // Stop following if manual move
+							agent.moveTo(x, z);
+						}
 					}
-				} 
-                // ...
- else if (action.startsWith('FOLLOW')) {
+				} else if (action.startsWith('FOLLOW')) {
 					consecutiveSayCount = 0;
 					const parts = action.split(' ');
 					const targetId = parts[1];
@@ -821,8 +881,10 @@ const WORLD_BOUNDS = { minX: -50, maxX: 50, minZ: -50, maxZ: 50 };
 					}
 				} else if (action.startsWith('STOP')) {
 					agent.followTargetId = null;
-					agent.targetPosition = null;
 					console.log(`🛑 Stopping.`);
+					// agent.stop(); // Removed invalid call
+				} else if (action === 'WAIT') {
+					// Do nothing
 				} else if (action.startsWith('SAY')) {
 					// Only use this if message field was empty (legacy support)
 					if (!hasSpoken) {
