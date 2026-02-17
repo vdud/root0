@@ -95,19 +95,18 @@
 		currentState = target;
 	}
 
-	async function initMixer(scene: any) {
-		const newMixer = new AnimationMixer(scene);
-
-		const [idle, run, walk, jumpStart, jumpMid, jumpEnd] = await Promise.all([
-			$idleGltf,
-			$runGltf,
-			$walkingGltf,
-			$jumpStartGltf,
-			$jumpMidGltf,
-			$jumpEndGltf
-		]);
+	// Reactive initialization
+	$effect(() => {
+		const characterMesh = scene; // Use the derived scene we are rendering
+		const idle = $idleGltf;
+		const run = $runGltf;
+		const walk = $walkingGltf;
+		const jumpStart = $jumpStartGltf;
+		const jumpMid = $jumpMidGltf;
+		const jumpEnd = $jumpEndGltf;
 
 		if (
+			!characterMesh ||
 			!idle?.animations?.[0] ||
 			!run?.animations?.[0] ||
 			!walk?.animations?.[0] ||
@@ -115,9 +114,16 @@
 			!jumpMid?.animations?.[0] ||
 			!jumpEnd?.animations?.[0]
 		) {
-			console.error('Missing animations');
+			isReady = false;
 			return;
 		}
+
+		// Cleanup old mixer if it exists
+		if (mixer) {
+			mixer.stopAllAction();
+		}
+
+		const newMixer = new AnimationMixer(characterMesh);
 
 		actions.idle = newMixer.clipAction(idle.animations[0]);
 		actions.idle.setLoop(LoopRepeat, Infinity);
@@ -141,6 +147,8 @@
 		actions.jumpEnd.clampWhenFinished = true;
 
 		newMixer.addEventListener('finished', (e) => {
+			// We need to access the *current* state of actions here, which is fine as they are in the closure/module scope,
+			// but we stored them in the `actions` object which is stable.
 			if (e.action === actions.jumpStart && jumpPhase === 'takeoff') {
 				jumpPhase = 'hang';
 				if (actions.jumpMid) {
@@ -154,11 +162,18 @@
 			}
 		});
 
+		// Start initial animation
 		actions.idle.play();
 		currentState = 'idle';
 		mixer = newMixer;
 		isReady = true;
-	}
+
+		return () => {
+			newMixer.stopAllAction();
+			mixer = null;
+			isReady = false;
+		};
+	});
 
 	useTask((delta) => {
 		if (!isReady || !mixer) return;
@@ -273,4 +288,8 @@
 			};
 		}}
 	/>
+{/if}
+
+{#if isReady}
+	<!-- This ensures we re-run logic if dependent stores change, handled via effect now -->
 {/if}

@@ -361,7 +361,9 @@ async function main() {
        **How to Update Memory**:
        If you learn something new (a name, a fact, a user preference) or finish a significant interaction, use the "memory_update" field.
        Set "memory_type" to one of: 'long_term', 'episodic', 'semantic'.
-       - Use 'long_term' for enduring facts.
+       - Use 'long_term' for enduring facts about people/world.
+         - 🚫 DO NOT save specific positions (coords), "nearby" status, or transient states here.
+         - 🚫 DO NOT save "Owner is nearby" or "I am at (x,y)". These belong in Context or Episodic.
        - Use 'episodic' for event summaries.
        - Use 'semantic' for general knowledge.
 
@@ -409,11 +411,30 @@ async function main() {
 				return `[${msg.senderId}] ${dmPrefix}${prefix}[${senderName}]: ${msg.content}`;
 			};
 
-			const humanChatLog = recentMessages
+			const ownerChatLog = recentMessages
+				.filter((msg) => {
+					const senderData = agent.otherPlayers.get(msg.senderId);
+					const isOwner =
+						ownerAddress &&
+						senderData &&
+						senderData.walletAddress?.toLowerCase() === ownerAddress &&
+						!senderData.isAgent;
+					return isOwner;
+				})
+				.map(formatMessage)
+				.join('\n');
+
+			const guestChatLog = recentMessages
 				.filter((msg) => {
 					const senderData = agent.otherPlayers.get(msg.senderId);
 					// explicitly check for isAgent === true to exclude, otherwise assume human (or unknown)
-					return senderData?.isAgent !== true;
+					// AND check that it is NOT the owner
+					const isOwner =
+						ownerAddress &&
+						senderData &&
+						senderData.walletAddress?.toLowerCase() === ownerAddress &&
+						!senderData.isAgent;
+					return senderData?.isAgent !== true && !isOwner;
 				})
 				.map(formatMessage)
 				.join('\n');
@@ -540,8 +561,11 @@ async function main() {
 								: 'None'
 						}
             
-            ## HUMAN CHAT LOG (PRIORITY)
-            ${humanChatLog || '(No recent human messages)'}
+            ## 👑 OWNER CHAT LOG (HIGHEST PRIORITY)
+            ${ownerChatLog || '(No recent owner messages)'}
+
+            ## 👤 OTHER HUMANS CHAT LOG (HIGH PRIORITY)
+            ${guestChatLog || '(No recent guest messages)'}
 
             ## AGENT CHAT LOG (BACKGROUND)
             ${agentChatLog || '(No recent agent messages)'}
@@ -618,7 +642,8 @@ async function main() {
             What do you do?
             `;
 
-			console.log(`📝 Human Log:\n${humanChatLog}`);
+			console.log(`📝 Owner Log:\n${ownerChatLog}`);
+			console.log(`📝 Guest Log:\n${guestChatLog}`);
 			console.log(`📝 Agent Log:\n${agentChatLog}`);
 			console.log(
 				`👀 nearbyEntities: ${observation.nearbyEntities.length} | obstacles: ${observation.obstacles?.length || 0} | chatLog: ${observation.chatLog.length}`
