@@ -5,4 +5,14 @@ node_modules
 dist
 .svelte-kit
 .vercel
+.partykit
 .agent/memories
+
+# Exclude Frontend & Game Server components not needed for Agent Fleet
+src/routes
+src/lib/components
+src/lib/posts
+src/party
+static
+docs
+README.md

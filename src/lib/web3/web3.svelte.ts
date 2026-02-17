@@ -48,8 +48,26 @@ class Web3State {
 			});
 
 			// Wagmi State Subscription (This is reliable for connection status)
-			this.config.subscribe((state: any) => {
-				this.address = state.connections.get(state.current)?.accounts[0] || null;
+			this.config.subscribe(async (state: any) => {
+				const newAddress = state.connections.get(state.current)?.accounts[0] || null;
+
+				if (newAddress && newAddress !== this.address) {
+					this.address = newAddress;
+					// Sync user to DB
+					try {
+						await fetch('/api/users/sync', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ walletAddress: newAddress })
+						});
+						console.log('✅ User synced to Supabase:', newAddress);
+					} catch (e) {
+						console.error('❌ Failed to sync user:', e);
+					}
+				} else {
+					this.address = newAddress;
+				}
+
 				this.chainId = state.chainId;
 				this.isConnected = !!this.address;
 			});
