@@ -160,7 +160,10 @@ export class NetworkManager implements AgentInterface {
 					type: 'player',
 					position: { x: p.x, y: p.y, z: p.z },
 					rotation: p.rotation || 0,
-					distance: dist
+					distance: dist,
+					name: p.name,
+					isAgent: p.isAgent,
+					walletAddress: p.walletAddress
 				};
 			}),
 			chatLog: [], // Todo: Implement Chat
@@ -195,6 +198,17 @@ export class NetworkManager implements AgentInterface {
 		if (msg.type === 'sync-music') {
 			// Calculate local timestamp of when server started
 			this.serverStartTime = Date.now() - msg.elapsed;
+		} else if (msg.type === 'player-sync') {
+			// Initial sync of existing players
+			if (msg.players && Array.isArray(msg.players)) {
+				msg.players.forEach((p: PlayerState) => {
+					if (p.id !== this.socket.id) {
+						this.otherPlayers.set(p.id, p);
+					}
+				});
+				// Force reactivity
+				this.otherPlayers = new Map(this.otherPlayers);
+			}
 		} else if (msg.type === 'player-update') {
 			const { id, data } = msg;
 			if (id === this.socket.id) return;
@@ -564,7 +578,7 @@ export class NetworkManager implements AgentInterface {
 				// collision detection (Polite Peer)
 				const isStable =
 					pc.signalingState === 'stable' ||
-					(pc.signalingState === 'stable' && !this.makingOffer.get(senderId));
+					(pc.signalingState === 'have-local-offer' && !this.makingOffer.get(senderId));
 				const offerCollision = description.type === 'offer' && !isStable;
 
 				const polite = this.socket.id < senderId; // Lower ID is polite

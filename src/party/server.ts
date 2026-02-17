@@ -59,6 +59,9 @@ export default class Server implements Party.Server {
 		]
 	]); // Store placed world objects
 
+	// Track active player states for new connections
+	players: Map<string, PlayerState> = new Map();
+
 	constructor(readonly room: Party.Room) {}
 
 	onConnect(conn: Party.Connection, ctx: Party.ConnectionContext) {
@@ -86,6 +89,24 @@ export default class Server implements Party.Server {
 			})
 		);
 
+		// Send existing players to the new player (Fix for invisible bots)
+		// We send a snapshot of all *other* players currently in the room
+		const existingPlayers: PlayerState[] = [];
+		for (const [id, state] of this.players.entries()) {
+			if (id !== conn.id) {
+				existingPlayers.push(state);
+			}
+		}
+
+		if (existingPlayers.length > 0) {
+			conn.send(
+				JSON.stringify({
+					type: 'player-sync',
+					players: existingPlayers
+				})
+			);
+		}
+
 		// Notify others that a new player joined
 		this.room.broadcast(
 			JSON.stringify({
@@ -101,6 +122,12 @@ export default class Server implements Party.Server {
 
 		// Re-broadcast updates to everyone else
 		if (data.type === 'player-update') {
+			// Update server-side state for new joiners
+			// We trust the client's data (for now)
+			// Ensure we keep the ID consistent
+			const pState: PlayerState = { ...data.data, id: sender.id };
+			this.players.set(sender.id, pState);
+
 			this.room.broadcast(
 				JSON.stringify({
 					type: 'player-update',
@@ -211,6 +238,9 @@ export default class Server implements Party.Server {
 	}
 
 	onClose(conn: Party.Connection) {
+		// Remove from state tracking
+		this.players.delete(conn.id);
+
 		// Notify others that player left
 		this.room.broadcast(
 			JSON.stringify({

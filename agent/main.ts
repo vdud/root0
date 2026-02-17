@@ -412,7 +412,8 @@ async function main() {
 			const humanChatLog = recentMessages
 				.filter((msg) => {
 					const senderData = agent.otherPlayers.get(msg.senderId);
-					return !senderData?.isAgent; // Include unknown (likely human) and confirmed humans
+					// explicitly check for isAgent === true to exclude, otherwise assume human (or unknown)
+					return senderData?.isAgent !== true;
 				})
 				.map(formatMessage)
 				.join('\n');
@@ -420,7 +421,7 @@ async function main() {
 			const agentChatLog = recentMessages
 				.filter((msg) => {
 					const senderData = agent.otherPlayers.get(msg.senderId);
-					return senderData?.isAgent;
+					return senderData?.isAgent === true;
 				})
 				.map(formatMessage)
 				.join('\n');
@@ -435,14 +436,14 @@ async function main() {
 			const latestHumanMsg = reversedLog.find((msg) => {
 				if (msg.senderId === agent.socket.id) return false;
 				const senderData = agent.otherPlayers.get(msg.senderId);
-				return !senderData?.isAgent;
+				return senderData?.isAgent !== true;
 			});
 
 			// 2. Look for Agent Message
 			const latestAgentMsg = reversedLog.find((msg) => {
 				if (msg.senderId === agent.socket.id) return false;
 				const senderData = agent.otherPlayers.get(msg.senderId);
-				return senderData?.isAgent;
+				return senderData?.isAgent === true;
 			});
 
 			if (latestHumanMsg) {
@@ -451,7 +452,7 @@ async function main() {
 					ownerAddress &&
 					senderData &&
 					senderData.walletAddress?.toLowerCase() === ownerAddress &&
-					!senderData.isAgent;
+					senderData.isAgent !== true;
 
 				const authority = isOwner ? '👑 OWNER (HIGHEST PRIORITY)' : '👤 HUMAN (HIGH PRIORITY)';
 				latestInstruction = `🚨 LATEST HUMAN INSTRUCTION (${authority}): "${latestHumanMsg.content}"`;
