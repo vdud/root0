@@ -28,7 +28,8 @@
 
 	// ... (mixer state)
 
-	let mixer = $state<AnimationMixer | null>(null);
+	// ... (mixer state)
+	let mixer: AnimationMixer | null = null;
 	let isReady = $state(false);
 
 	type AnimState = 'idle' | 'walk' | 'run' | 'jumpStart' | 'jumpMid' | 'jumpEnd';
@@ -39,7 +40,7 @@
 	let wasGrounded = $state(true);
 	let jumpPressed = $state(false);
 
-	const actions = $state<Partial<Record<AnimState, any>>>({});
+	const actions: Partial<Record<AnimState, any>> = {};
 
 	// Rotation state
 	let currentRotation = $state(0);
