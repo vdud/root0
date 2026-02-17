@@ -118,10 +118,8 @@
 			return;
 		}
 
-		// Cleanup old mixer if it exists
-		if (mixer) {
-			mixer.stopAllAction();
-		}
+		// Cleanup old mixer if it exists - Handled by return function of previous effect run
+		// if (mixer) { mixer.stopAllAction(); }
 
 		const newMixer = new AnimationMixer(characterMesh);
 
@@ -282,10 +280,6 @@
 					}
 				}
 			});
-			initMixer(ref);
-			return () => {
-				mixer?.stopAllAction();
-			};
 		}}
 	/>
 {/if}

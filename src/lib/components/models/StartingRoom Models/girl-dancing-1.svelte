@@ -29,7 +29,9 @@ Title: Belly Dance
 		if (!acts || !Object.keys(acts).length) return;
 
 		const action = acts['mixamo.com'];
-		action.reset().play();
+		if (action) {
+			action.reset().play();
+		}
 
 		return () => action.stop();
 	});

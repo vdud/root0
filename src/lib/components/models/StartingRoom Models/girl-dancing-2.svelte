@@ -29,7 +29,9 @@ Title: EVE Nikke Suit
 		if (!acts || !Object.keys(acts).length) return;
 
 		const action = acts['5363356613632_TempMotion'];
-		action.reset().play();
+		if (action) {
+			action.reset().play();
+		}
 
 		return () => action.stop();
 	});
