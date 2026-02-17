@@ -33,7 +33,7 @@ Title: Belly Dance
 			action.reset().play();
 		}
 
-		return () => action.stop();
+		return () => action?.stop();
 	});
 </script>
 

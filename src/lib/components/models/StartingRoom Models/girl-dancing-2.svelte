@@ -33,7 +33,7 @@ Title: EVE Nikke Suit
 			action.reset().play();
 		}
 
-		return () => action.stop();
+		return () => action?.stop();
 	});
 </script>
 
