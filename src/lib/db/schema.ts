@@ -1,8 +1,14 @@
-import { pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uuid, jsonb } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
 	id: uuid('id').primaryKey().defaultRandom(),
 	walletAddress: text('wallet_address').notNull().unique(),
+	email: text('email'),
+	provider: text('provider'),
+	rawData: text('raw_data'), // storing as text to avoid complex casting, can be jsonb in DB but text in Drizzle if needed, or custom type. Let's stick to text for simplicity or jsonb if supported directly.
+	// Actually schema.ts uses pg-core, let's check imports. It has `text`. Let's use `jsonb` if available or `text` and JSON.stringify.
+	// Looking at the file content from view_file (step 18), it imports `pgTable, text, timestamp, uuid`. I should add `jsonb` to imports if I want to use it, or just use `text`.
+	// The plan said `raw_data` (jsonb). I'll use `jsonb` and add it to imports.
 	createdAt: timestamp('created_at').defaultNow(),
 	lastSeen: timestamp('last_seen').defaultNow()
 });

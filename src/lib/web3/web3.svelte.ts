@@ -55,12 +55,37 @@ class Web3State {
 					this.address = newAddress;
 					// Sync user to DB
 					try {
+						// Extract user info from AppKit state
+						// The state object structure for Reown AppKit varies, but generally user info is available
+						// We might need to check specific fields like `state.user` or similar if available, or just send what we have.
+						// Based on research, we might get email if social login is used.
+						// Let's inspect the state object in the console for debugging,
+						// and attempt to extract email/provider if possible.
+						// For now we will send the whole state or relevant parts as rawData.
+
+						// Note: actual field names for email might be in a user object or session.
+						// I will try to safely access them.
+						// If not directly in `state`, it might be in `this.modal.getSnapshot()` or similar.
+						// Let's try to get it from `state` first as it's passed here.
+						// Common structure: state.user?.email or similar.
+
+						const userState = this.modal.getIsConnectedState(); // Check if this exists or just use state
+						// Let's just use `state` passed in subscribe.
+
+						const email = state.user?.email || state.session?.user?.email || null;
+						const provider = state.provider || state.session?.peer?.metadata?.name || 'wallet';
+
 						await fetch('/api/users/sync', {
 							method: 'POST',
 							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({ walletAddress: newAddress })
+							body: JSON.stringify({
+								walletAddress: newAddress,
+								email,
+								provider,
+								rawData: state // Send full state for debugging/storage
+							})
 						});
-						console.log('✅ User synced to Supabase:', newAddress);
+						console.log('✅ User synced to Supabase:', newAddress, email);
 					} catch (e) {
 						console.error('❌ Failed to sync user:', e);
 					}
