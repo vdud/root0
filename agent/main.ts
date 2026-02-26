@@ -292,9 +292,99 @@ async function main() {
 		console.warn('⚠️ Could not load skills', e);
 	}
 
+	// --- JACCARD SIMILARITY HELPER ---
+	const getJaccardSimilarity = (str1: string, str2: string): number => {
+		const stopWords = new Set([
+			'the',
+			'is',
+			'at',
+			'which',
+			'on',
+			'and',
+			'a',
+			'an',
+			'in',
+			'to',
+			'of',
+			'for',
+			'with',
+			'while',
+			'are',
+			'was',
+			'were',
+			'be',
+			'been',
+			'being',
+			'have',
+			'has',
+			'had',
+			'do',
+			'does',
+			'did',
+			'but',
+			'if',
+			'or',
+			'because',
+			'as',
+			'until',
+			'while',
+			'of',
+			'at',
+			'by',
+			'for',
+			'with',
+			'about',
+			'against',
+			'between',
+			'into',
+			'through',
+			'during',
+			'before',
+			'after',
+			'above',
+			'below',
+			'to',
+			'from',
+			'up',
+			'down',
+			'in',
+			'out',
+			'on',
+			'off',
+			'over',
+			'under',
+			'again',
+			'further',
+			'then',
+			'once'
+		]);
+
+		const tokenize = (str: string) => {
+			return str
+				.toLowerCase()
+				.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '')
+				.split(/\s+/)
+				.filter((w) => w.length > 2 && !stopWords.has(w));
+		};
+
+		const set1 = new Set(tokenize(str1));
+		const set2 = new Set(tokenize(str2));
+
+		if (set1.size === 0 || set2.size === 0) return 0;
+
+		const intersection = new Set([...set1].filter((x) => set2.has(x)));
+		const union = new Set([...set1, ...set2]);
+
+		return intersection.size / union.size;
+	};
+
 	const SYSTEM_PROMPT = `
     You are an AI agent named "${name}" in a 3D metaverse. 
     You observe the world, think about what to do, and then act.
+    
+    IMPORTANT: DO NOT repeat what others have just said. Contribute something NEW and unique to the conversation.
+    Avoid clichés like "enjoying the cool vibe". Be specific to your character and situation.
+
     
     ## SKILLS & TRAINING
     ### OBSERVATION
@@ -320,6 +410,11 @@ async function main() {
     1. Your GOAL is: ${purpose}
     2. Your OWNER has wallet address: ${ownerAddress || 'UNKNOWN'}
     3. Your DEFAULT BEHAVIOUR towards others is: "${behaviour}"
+
+    **BOT CHATTER RULE (VERY IMPORTANT)**:
+    - The "AGENT CHAT LOG" section is background context ONLY. Do NOT respond to bot messages with movement or conversation.
+    - If you see another bot saying "On my way!", "Coming to you!", "I'm already here!", or similar movement phrases — completely IGNORE them. Do not mimic or echo these phrases.
+    - If you have no human instructions and you are near other players, choose to MOVE somewhere new or WAIT silently. Do NOT keep saying "On my way" when you are already there.
     
     4. **INTERACTION PROTOCOL**:
        - **PRIORITY 1: DIRECT INTERACTION**: If you receive a **[DIRECT MESSAGE]** or are addressed by name:
@@ -346,7 +441,7 @@ async function main() {
        - Always respect **PERSONAL SPACE**. Do not move to a coordinate if someone else is already there (within 1.5m).
        - If you are too close to someone, move slightly away.
        - If asked to "move [distance] meters away" or "go back [distance]":
-         1. Get your current position (x, z).
+         1. Get the current position (x, z).
          2. Calculate a target coordinate far from your current spot.
          3. Example: If you are at (5, 5) and want to move 10m away, target could be (15, 15) or (-5, -5).
          4. Use the "MOVE x z" command with these new absolute coordinates.
@@ -365,6 +460,10 @@ async function main() {
          - 🚫 DO NOT save specific positions (coords), "nearby" status, or transient states here.
          - 🚫 DO NOT save "Owner is nearby" or "I am at (x,y)". These belong in Context or Episodic.
        - Use 'episodic' for event summaries.
+          - 🚫 DO NOT save generic status updates like "Staying in the dance area" or "Moving to owner".
+          - 🚫 DO NOT save "I am waiting here" or "I am enjoying the vibe".
+          - 🚫 DO NOT save ambient observations like "Observing social dynamics".
+          - ✅ ONLY save SIGNIFICANT EVENTS: "I met X", "Y told me a secret", "We fought a monster".
        - Use 'semantic' for general knowledge.
 
     Respond with a JSON object containing:
@@ -599,11 +698,8 @@ async function main() {
             
             CONTEXTUAL HINTS:
             - **CONVERSATIONAL POSITIONING**:
-               - When you REPLY to a player or speak to them, you **MUST MOVE** to stand in front of them (Face-to-Face).
-               - **FORMULA**: 
-                 Target X = Player X + sin(Player Rot) * 1.5
-                 Target Z = Player Z + cos(Player Rot) * 1.5
-               - Use the 'MOVE x z' command with these coordinates.
+               - If you are more than 3 meters away from a player you are talking to, you should MOVE closer.
+               - If you are already within 3 meters, you DO NOT need to MOVE. Just WAIT or SAY.
             - **FOLLOWING**: If asked to "follow me", use 'FOLLOW <speakerId>'. If asked to "follow the [object]", use 'FOLLOW <objectId>'.
             - **SPATIAL COMMANDS**: 
                - If asked to "go to the [object]" or "stand in front of the [object]", LOOK at "Nearby Obstacles".
@@ -672,10 +768,12 @@ async function main() {
 			if (!forceStop) {
 				if (consecutiveSayCount >= 5) {
 					console.log('⚠️ Too much talking, forcing a move...');
-					// Generate random move
-					const rx = (Math.random() - 0.5) * 20;
-					const rz = (Math.random() - 0.5) * 20;
-					action = `MOVE ${rx.toFixed(1)} ${rz.toFixed(1)}`;
+					// Generate escape move RELATIVE to current position so it's not blocked by nearby obstacles
+					const escapeX = agent.position.x + (Math.random() - 0.5) * 20;
+					const escapeZ = agent.position.z + (Math.random() - 0.5) * 20;
+					action = `MOVE ${escapeX.toFixed(1)} ${escapeZ.toFixed(1)}`;
+					// Reset immediately so we can't get permanently stuck in this branch even if move is blocked
+					consecutiveSayCount = 0;
 				} else {
 					const startTime = Date.now();
 					try {
@@ -686,7 +784,10 @@ async function main() {
 									{ role: 'system', content: SYSTEM_PROMPT },
 									{ role: 'user', content: userPrompt }
 								],
-								max_tokens: 500
+								max_tokens: 500,
+								temperature: 0.9, // Higher creativity to avoid loops
+								presence_penalty: 0.6, // Discourage repeating topics
+								frequency_penalty: 0.6 // Discourage repeating exact words
 							},
 							{ timeout: 60000 }
 						); // 60s timeout
@@ -749,13 +850,35 @@ async function main() {
 								}
 
 								if (memoryUpdate) {
+									const DUPLICATE_THRESHOLD = 0.4;
 									// DEDUPLICATION CHECK
 									// Check if we have saved this exact content recently (in the last 60 seconds)
-									const isDuplicate =
+									let isDuplicate =
 										observation.chatLog.some((m) => m.content.includes(memoryUpdate)) || // Check chat
 										longTermMemory.includes(memoryUpdate) ||
 										episodicMemory.includes(memoryUpdate) ||
 										semanticMemory.includes(memoryUpdate);
+
+									if (!isDuplicate && memoryType === 'episodic') {
+										// JACCARD CHECK
+										// Split episodic memory by newlines/entries to check against recent ones
+										const previousMemories = episodicMemory
+											.split('\n')
+											.map((line) => line.replace(/^\[.*?\]\s*/, '')) // Remove timestamp
+											.filter((line) => line.length > 5)
+											.slice(-10); // Check last 10 memories
+
+										for (const mem of previousMemories) {
+											const score = getJaccardSimilarity(memoryUpdate, mem);
+											if (score >= DUPLICATE_THRESHOLD) {
+												console.log(
+													`🔍 Jaccard Match (${score.toFixed(2)}) for "${memoryUpdate}" vs "${mem}"`
+												);
+												isDuplicate = true;
+												break;
+											}
+										}
+									}
 
 									if (isDuplicate) {
 										console.log(`⚠️ Skipping Duplicate Memory: "${memoryUpdate}"`);
@@ -804,9 +927,14 @@ async function main() {
 				lastAction = action;
 
 				if (action.startsWith('MOVE')) {
-					const parts = action.split(' ');
-					let x = parseFloat(parts[1]);
-					let z = parseFloat(parts[2]);
+					// Extract all numbers from the action string, handling negatives and floats
+					const nums = action.match(/-?\d+(\.\d+)?/g);
+					let x = NaN,
+						z = NaN;
+					if (nums && nums.length >= 2) {
+						x = parseFloat(nums[0]);
+						z = parseFloat(nums[1]);
+					}
 
 					// Check if we are currently following someone
 					if (agent.followTargetId) {
