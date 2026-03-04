@@ -12,52 +12,7 @@ export type PlayerState = {
 export default class Server implements Party.Server {
 	startTime = Date.now();
 	marketListings: any[] = []; // Store active listings in memory
-	worldObjects: Map<string, any> = new Map([
-		[
-			'girl-dancing-1',
-			{
-				id: 'girl-dancing-1',
-				type: 'npc',
-				description: 'A dancing girl avatar.',
-				position: { x: 5, y: 0, z: 5 },
-				radius: 1.0,
-				color: 'unknown'
-			}
-		],
-		[
-			'girl-dancing-2',
-			{
-				id: 'girl-dancing-2',
-				type: 'npc',
-				description: 'Another dancing girl avatar.',
-				position: { x: -2.4, y: 0, z: -8 },
-				radius: 1.0,
-				color: 'unknown'
-			}
-		],
-		[
-			'car-1',
-			{
-				id: 'car-1',
-				type: 'vehicle',
-				description: 'A sleek yellow sports car.',
-				position: { x: 10, y: 0, z: -5 },
-				radius: 2.5,
-				color: 'yellow'
-			}
-		],
-		[
-			'low-poly-ground-speaker',
-			{
-				id: 'low-poly-ground-speaker',
-				type: 'furniture',
-				description: 'A large ground speaker playing music.',
-				position: { x: -10, y: 0, z: -5 },
-				radius: 1.5,
-				color: 'black'
-			}
-		]
-	]); // Store placed world objects
+	worldObjects: Map<string, any> = new Map(); // Store placed world objects
 
 	// Track active player states for new connections
 	players: Map<string, PlayerState> = new Map();

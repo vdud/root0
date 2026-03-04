@@ -1,6 +1,8 @@
+# Node
 node_modules
+.pnpm-store
 
-# Output
+# Output / Build artifacts
 .output
 .vercel
 .netlify
@@ -12,12 +14,27 @@ node_modules
 .DS_Store
 Thumbs.db
 
-# Env
+# Env / Secrets — NEVER COMMIT
 .env
 .env.*
 !.env.example
 !.env.test
 
-# Vite
+# Vite cache
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/settings.json
+.idea/
+
+# TypeScript
+*.tsbuildinfo
+
+# Docs
+docs
+

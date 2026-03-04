@@ -2,15 +2,55 @@
 
 Use this guide when you make changes to the agent code (AI logic, personality, or network protocol) and need to update your AWS server.
 
-## 1. On Your Local Mac
+---
 
-Run these commands in your project root to build the updated image and push it to AWS ECR.
+## Logging In
+
+### SSH into EC2
 
 ```bash
-# A. Build for Intel/AMD architecture (Must use --platform linux/amd64)
+# This server runs Amazon Linux — use ec2-user (NOT ubuntu)
+ssh -i ~/Downloads/root0-ai-agents-aws-key.pem ec2-user@13.204.77.125
+```
+
+> **Permission error?** Run `chmod 400 ~/.ssh/YOUR_KEY.pem` first.
+
+---
+
+### AWS CLI Login (for ECR push/pull)
+
+Required before any `docker push` or `docker pull` from ECR. Runs on both your Mac and EC2.
+
+```bash
+# First-time setup (run once on a new machine)
+aws configure
+# Enter: Access Key ID, Secret Access Key, Region: ap-south-1, Output: json
+
+# Login to ECR (token expires every 12 hours — re-run when you get "unauthorized")
+aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 428589675370.dkr.ecr.ap-south-1.amazonaws.com
+```
+
+---
+
+### Git / GitHub Login
+
+```bash
+# Option A: GitHub CLI (easiest)
+gh auth login
+
+# Option B: Personal Access Token (PAT) via HTTPS
+git remote set-url origin https://<YOUR_PAT>@github.com/YOUR_USERNAME/root0.git
+```
+
+---
+
+## 1. On Your Local Mac — Build & Push
+
+```bash
+# A. Build for AWS (Intel/AMD) — required flag on Mac
 docker build --platform linux/amd64 -t root0-agent .
 
-# B. Login to AWS ECR
+# B. Login to ECR (see above)
 aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 428589675370.dkr.ecr.ap-south-1.amazonaws.com
 
 # C. Tag and Push
@@ -18,67 +58,82 @@ docker tag root0-agent:latest 428589675370.dkr.ecr.ap-south-1.amazonaws.com/root
 docker push 428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
 ```
 
-### Extras
+### Local Fleet Manager
 
 ```bash
-# To restart the fleet manager
+# Restart locally
 docker-compose down --remove-orphans && docker-compose up -d
-# Check Logs
 
+# View logs
 docker logs -f root0-agent-fleet-1
 ```
 
-## 2. On Your AWS EC2 Terminal
+---
 
-Connect to your EC2 instance and run these to pull the new version and restart the Fleet Manager.
+## 2. On EC2 — Pull & Restart
+
+SSH in first (see above), then:
 
 ```bash
-# A. Stop and remove the old container
+# A. Stop old container and clean up
 docker rm -f agent-fleet
 docker system prune -a -f
 
-# B. Pull the fresh image from ECR
+# B. Login to ECR (on EC2)
+aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 428589675370.dkr.ecr.ap-south-1.amazonaws.com
+
+# C. Pull latest image
 docker pull 428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
 
-# C. Restart the Fleet Manager
-# Replace "YOUR_KEY" with your actual OpenRouter API Key
-# docker run -d \
-#   --name agent-fleet \
-#   -p 3000:3000 \
-#   --restart always \
-#   -e OPENROUTER_API_KEY="YOUR_KEY" \
-#   -e NEXT_PUBLIC_PARTYKIT_HOST="root0-server.vdud.partykit.dev" \
-#   428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
+# D. Run the Fleet Manager
+docker run -d --name agent-fleet -p 3000:3000 --restart always \
+  -e OPENROUTER_API_KEY="..." \
+  -e NEXT_PUBLIC_PARTYKIT_HOST="root0-server.vdud.partykit.dev" \
+  -e DATABASE_URL="..." \
+  428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
 
-
-  docker run -d --name agent-fleet -p 3000:3000 --restart always -e OPENROUTER_API_KEY="..." -e NEXT_PUBLIC_PARTYKIT_HOST="root0-server.vdud.partykit.dev" -e DATABASE_URL="..." 428589675370.dkr.ecr.ap-south-1.amazonaws.com/root0-agent:latest
-```
-
-```bash
-# Check logs
+# E. Check logs
+docker logs -f --tail 0 agent-fleet
 docker logs -f agent-fleet
 ```
 
-> **Note:** The `NEXT_PUBLIC_PARTYKIT_HOST` variable is now optional if you are connecting to production, as it defaults to `root0-server.vdud.partykit.dev` in the code. However, keeping it makes the configuration explicit.
+---
 
-## 3. Update the Frontend (Vercel)
+## 3. Frontend (Vercel)
 
-If you modified any files in `src/`, don't forget to push your changes to GitHub to trigger a Vercel redeploy.
+If you modified anything in `src/`, push to GitHub to trigger a Vercel redeploy:
 
 ```bash
 git add .
-git commit -m "chore: update agent logic and frontend"
+git commit -m "chore: update agent"
 git push origin main
 ```
 
 ---
 
+## Ignore Files Reference
+
+| File              | Purpose                                                        |
+| ----------------- | -------------------------------------------------------------- |
+| `.gitignore`      | Files Git will never commit (secrets, build outputs, OS junk)  |
+| `.dockerignore`   | Excluded from the Docker build context — keeps images lean     |
+| `.prettierignore` | Files Prettier won't auto-format (lock files, generated files) |
+
+**Key things that are ignored:**
+
+- `.env` / `.env.*` — **API keys and secrets** — never committed ⚠️
+- `node_modules/` — always reinstalled, never shipped
+- `.svelte-kit/`, `/build` — build artifacts, regenerated on deploy
+- `.agent/memories` — local agent memory (not shipped in Docker image)
+- `pnpm-lock.yaml` — not formatted by Prettier (auto-generated)
+
+---
+
 ## Troubleshooting
 
-- **Check Logs:** `docker logs -f agent-fleet`
-- **Verify Port 3000:** Check AWS Console -> Security Groups -> Inbound Rules.
-- **Architecture Error:** If you see `exec format error`, it means the image was built for `arm64` (Mac) instead of `amd64` (AWS). Re-run the build with the `--platform` flag.
-
-```
-
-```
+| Problem                                 | Fix                                                                                 |
+| --------------------------------------- | ----------------------------------------------------------------------------------- |
+| `exec format error`                     | Image built for `arm64` (Mac). Re-build with `--platform linux/amd64`               |
+| `unauthorized: authentication required` | ECR token expired. Re-run the `aws ecr get-login-password` login                    |
+| `Permission denied (publickey)`         | Wrong key file or wrong user. Try `ubuntu@` or `ec2-user@`. Run `chmod 400 key.pem` |
+| Port 3000 not reachable                 | AWS Console → Security Groups → Inbound Rules → allow TCP 3000                      |

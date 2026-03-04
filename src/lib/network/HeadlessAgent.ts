@@ -9,6 +9,7 @@ import type {
 	EntityState,
 	ChatMessage
 } from './AgentProtocol';
+import { Raycaster } from '../../../agent/physics';
 
 // Polyfill WebSocket for Node.js
 global.WebSocket = WebSocket as any;
@@ -33,6 +34,11 @@ export class HeadlessAgent {
 	readonly TICK_RATE = 50; // ms
 	readonly GRAVITY = -18.0; // m/s^2 (strong gravity for snappiness)
 	readonly GROUND_Y = 0.9;
+	readonly FIELD_OF_VIEW = Math.PI * (2 / 3); // 120 degrees
+
+	// Memory
+	seenPlayers: Map<string, EntityState> = new Map();
+	seenObstacles: Map<string, any> = new Map();
 
 	otherPlayers: Map<string, any> = new Map();
 	marketListings: any[] = [];
@@ -201,6 +207,7 @@ export class HeadlessAgent {
 				}
 			} else {
 				// Arrived
+				this.position.x = this.targetPosition.x;
 				this.position.z = this.targetPosition.z;
 				console.log(
 					`[Agent Tick] Arrived at target: ${this.position.x.toFixed(2)}, ${this.position.z.toFixed(2)}`
@@ -415,27 +422,8 @@ export class HeadlessAgent {
 			velocity: { x: 0, y: 0, z: 0 }
 		};
 
-		const nearbyEntities: EntityState[] = Array.from(this.otherPlayers.values())
-			.map((p) => {
-				const dist = Math.sqrt(
-					Math.pow(p.x - this.position.x, 2) + Math.pow(p.z - this.position.z, 2)
-				);
-				return {
-					id: p.id,
-					type: 'player' as const,
-					position: { x: p.x, y: p.y, z: p.z },
-					rotation: p.rotation || 0,
-					distance: dist,
-					walletAddress: p.walletAddress,
-					name: p.name,
-					isAgent: p.isAgent,
-					isGuest: !p.walletAddress
-				};
-			})
-			.filter((e) => e.distance < 50); // Perception range for players
-
-		// Scan for obstacles (dynamic world objects)
-		const obstacles = Array.from(this.knownObjects.values())
+		// 1. Process all known obstacles
+		const allObstacles = Array.from(this.knownObjects.values())
 			.map((obs) => {
 				const x = obs.position?.x ?? obs.x ?? 0;
 				const z = obs.position?.z ?? obs.z ?? 0;
@@ -453,14 +441,106 @@ export class HeadlessAgent {
 					distance: dist
 				};
 			})
-			.filter((o) => o.distance < 100); // Increased from 20m to 100m so agents can find distant objects
+			.filter((o) => {
+				// Base visibility is 50m. Objects gain +20m of visibility per 1m of radius (size).
+				const maxVisibleDistance = 50 + o.radius * 20;
+				return o.distance < maxVisibleDistance;
+			});
+
+		// Update Obstacle Memory based on FOV and Line of Sight
+		for (const obs of allObstacles) {
+			const dx = obs.position.x - this.position.x;
+			const dz = obs.position.z - this.position.z;
+			const angleToTarget = Math.atan2(dx, dz);
+
+			let angleDiff = angleToTarget - this.rotation;
+			while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+			while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+
+			// If very close to something, we can always see/feel it. Otherwise check FOV.
+			if (obs.distance < 0.5 || Math.abs(angleDiff) <= this.FIELD_OF_VIEW / 2) {
+				if (Raycaster.checkLineOfSight(this.position, obs.position, allObstacles, obs.id)) {
+					this.seenObstacles.set(obs.id, obs);
+				}
+			}
+		}
+
+		// 2. Process all known players
+		const allEntities = Array.from(this.otherPlayers.values())
+			.map((p) => {
+				const dist = Math.sqrt(
+					Math.pow(p.x - this.position.x, 2) + Math.pow(p.z - this.position.z, 2)
+				);
+				return {
+					id: p.id,
+					type: 'player' as const,
+					position: { x: p.x, y: p.y, z: p.z },
+					rotation: p.rotation || 0,
+					distance: dist,
+					walletAddress: p.walletAddress,
+					name: p.name,
+					isAgent: p.isAgent,
+					isGuest: !p.walletAddress
+				};
+			})
+			.filter((e) => {
+				// Base visibility is 50m. A player character is roughly radius 1.0 (+20m). So max is 70m usually.
+				const maxVisibleDistance = 50 + 1.0 * 20;
+				return e.distance < maxVisibleDistance;
+			});
+
+		// Update Player Memory based on FOV and Line of Sight
+		for (const p of allEntities) {
+			const dx = p.position.x - this.position.x;
+			const dz = p.position.z - this.position.z;
+			const angleToTarget = Math.atan2(dx, dz);
+
+			let angleDiff = angleToTarget - this.rotation;
+			while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+			while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+
+			// If very close, assume we can see them. Otherwise check FOV.
+			if (p.distance < 0.5 || Math.abs(angleDiff) <= this.FIELD_OF_VIEW / 2) {
+				if (Raycaster.checkLineOfSight(this.position, p.position, allObstacles, p.id)) {
+					this.seenPlayers.set(p.id, p);
+				}
+			}
+		}
+
+		// Cleanup stale keys
+		for (const id of this.seenPlayers.keys()) {
+			if (!this.otherPlayers.has(id)) {
+				this.seenPlayers.delete(id);
+			}
+		}
+		for (const id of this.seenObstacles.keys()) {
+			if (!this.knownObjects.has(id)) {
+				this.seenObstacles.delete(id);
+			}
+		}
+
+		// Recompute distances for memories based on current agent position
+		const memorizedObstacles = Array.from(this.seenObstacles.values()).map((obs) => {
+			const dist = Math.sqrt(
+				Math.pow(obs.position.x - this.position.x, 2) +
+					Math.pow(obs.position.z - this.position.z, 2)
+			);
+			return { ...obs, distance: dist };
+		});
+
+		const memorizedPlayers = Array.from(this.seenPlayers.values()).map((p) => {
+			const dist = Math.sqrt(
+				Math.pow(p.position.x - this.position.x, 2) + Math.pow(p.position.z - this.position.z, 2)
+			);
+			return { ...p, distance: dist };
+		});
 
 		return {
 			self: selfState,
-			nearbyEntities,
+			nearbyEntities: memorizedPlayers,
 			chatLog: [...this.chatLog],
 			marketListings: [...this.marketListings],
-			obstacles,
+			obstacles: memorizedObstacles,
 			timestamp: Date.now()
 		};
 	}

@@ -201,64 +201,7 @@ async function main() {
 	console.log('✅ Connected to Game Server. Starting logic loop...');
 
 	if (shouldSeed) {
-		console.log('🌱 Seeding World Objects...');
-		const INITIAL_OBJECTS = [
-			// Girl 1: Visual pos is (2, -7), Rot Y -45 deg (-0.78 rad)
-			{
-				id: 'girl-dancing-1',
-				x: 2,
-				z: -7,
-				radius: 1.0,
-				rotation: -0.78,
-				description: 'A girl dancing (Belly Dance)'
-			},
-			// Girl 2: Visual pos is (-2.4, -8), Rot Y +45 deg (0.78 rad)
-			{
-				id: 'girl-dancing-2',
-				x: -2.4,
-				z: -8,
-				radius: 1.0,
-				rotation: 0.78,
-				description: 'A girl dancing in a suit'
-			},
-			// Car: Visual pos is (0, -10), Rot Y ~343 deg (6 rad)
-			{
-				id: 'car-1',
-				x: 0,
-				z: -10,
-				radius: 2.5,
-				rotation: 6.0,
-				description: 'A yellow sports car'
-			},
-			// Car 2: Visual pos is (6, -10), Rot Y ~343 deg (6 rad)
-			{
-				id: 'car-2',
-				x: 6,
-				z: -10,
-				radius: 2.5,
-				rotation: 6.0,
-				description: 'A red sports car'
-			},
-			// Speakers: Visual pos is (2, -10), Rot Y -28 deg (-0.5 rad)
-			{
-				id: 'low-poly-ground-speaker',
-				x: 2,
-				z: -10,
-				radius: 1.0,
-				rotation: -0.5,
-				description: 'Ground speakers playing music'
-			}
-		];
-
-		for (const obj of INITIAL_OBJECTS) {
-			console.log(`+ Placing ${obj.id} at (${obj.x}, ${obj.z})`);
-			agent.socket.send(
-				JSON.stringify({
-					type: 'object-place',
-					object: obj
-				})
-			);
-		}
+		console.log('🌱 (Should Seed flag provided, however world objects logic has been updated.)');
 	}
 
 	// DEBUG: Force a move to verify physics
@@ -400,7 +343,8 @@ async function main() {
     ${navigationSkill}
     
     Available Actions (Execute exactly one per turn):
-    - MOVE: "MOVE x z" (e.g., "MOVE 5 -5") - Move to specific ABSOLUTE coordinates. Range is roughly -100 to 100 for both X and Z.
+    - MOVE: "MOVE x z" (e.g., "MOVE 5 -5") - Move to specific ABSOLUTE coordinates. Range is roughly -50 to 50 for both X and Z. Do NOT use MOVE with your current coordinates to stay still; use WAIT instead.
+    - WANDER: "WANDER" - Randomly move to a new location. Use this to break away from other bots and explore the map.
     - FOLLOW: "FOLLOW id" (e.g., "FOLLOW player-123" or "FOLLOW car-1") - Continuously follow a specific player OR object. Use this when asked to "follow me" or "follow the [object]".
     - STOP: "STOP" - Stop moving or following.
     - SAY: "SAY message" (e.g., "SAY Hello world!") - Chat with nearby players.
@@ -411,10 +355,13 @@ async function main() {
     2. Your OWNER has wallet address: ${ownerAddress || 'UNKNOWN'}
     3. Your DEFAULT BEHAVIOUR towards others is: "${behaviour}"
 
-    **BOT CHATTER RULE (VERY IMPORTANT)**:
-    - The "AGENT CHAT LOG" section is background context ONLY. Do NOT respond to bot messages with movement or conversation.
-    - If you see another bot saying "On my way!", "Coming to you!", "I'm already here!", or similar movement phrases — completely IGNORE them. Do not mimic or echo these phrases.
-    - If you have no human instructions and you are near other players, choose to MOVE somewhere new or WAIT silently. Do NOT keep saying "On my way" when you are already there.
+    **BOT INTERACTION RULE**:
+    - You MUST interact with other bots based on your "BEHAVIOUR" trait (e.g., "${behaviour}").
+    - If your trait implies being social (e.g., "Gossiper", "Friendly"), actively talk to other bots to gather or spread info.
+    - If your trait is "Secretive", withhold information and be cautious when talking to other bots.
+    - If you are in a "Committed Relationship" or have a strong bond with another specific bot, converse with them like real humans do.
+    - Respond to other bots, but ONLY if your trait dictates it. Otherwise, you can choose to ignore them or wander.
+    - Completely IGNORE spammy phrases like "On my way!", "What a scene!".
     
     4. **INTERACTION PROTOCOL**:
        - **PRIORITY 1: DIRECT INTERACTION**: If you receive a **[DIRECT MESSAGE]** or are addressed by name:
@@ -577,7 +524,9 @@ async function main() {
 				const authority = isOwner ? '👑 OWNER (HIGHEST PRIORITY)' : '👤 HUMAN (HIGH PRIORITY)';
 				latestInstruction = `🚨 LATEST HUMAN INSTRUCTION (${authority}): "${latestHumanMsg.content}"`;
 			} else if (latestAgentMsg) {
-				latestInstruction = `ℹ️ Latest Bot Chatter: "${latestAgentMsg.content}" (Low Priority - Ignore if busy)`;
+				const senderData = agent.otherPlayers.get(latestAgentMsg.senderId);
+				const botName = senderData ? senderData.name : 'Another bot';
+				latestInstruction = `🤖 Latest Bot Chatter from ${botName}: "${latestAgentMsg.content}". (Decide how to respond based strictly on your "${behaviour}" trait. Do not ignore them unless your trait dictates so, e.g., if you are a gossiper, engage them! If secretive, be evasive!)`;
 			}
 			// -----------------------------
 
@@ -698,7 +647,8 @@ async function main() {
             
             CONTEXTUAL HINTS:
             - **CONVERSATIONAL POSITIONING**:
-               - If you are more than 3 meters away from a player you are talking to, you should MOVE closer.
+               - If you are talking to a HUMAN and are more than 3 meters away from them, you should MOVE closer.
+               - Do NOT move closer to other BOTS.
                - If you are already within 3 meters, you DO NOT need to MOVE. Just WAIT or SAY.
             - **FOLLOWING**: If asked to "follow me", use 'FOLLOW <speakerId>'. If asked to "follow the [object]", use 'FOLLOW <objectId>'.
             - **SPATIAL COMMANDS**: 
@@ -769,8 +719,10 @@ async function main() {
 				if (consecutiveSayCount >= 5) {
 					console.log('⚠️ Too much talking, forcing a move...');
 					// Generate escape move RELATIVE to current position so it's not blocked by nearby obstacles
-					const escapeX = agent.position.x + (Math.random() - 0.5) * 20;
-					const escapeZ = agent.position.z + (Math.random() - 0.5) * 20;
+					let escapeX = agent.position.x + (Math.random() - 0.5) * 20;
+					let escapeZ = agent.position.z + (Math.random() - 0.5) * 20;
+					escapeX = Math.max(WORLD_BOUNDS.minX, Math.min(WORLD_BOUNDS.maxX, escapeX));
+					escapeZ = Math.max(WORLD_BOUNDS.minZ, Math.min(WORLD_BOUNDS.maxZ, escapeZ));
 					action = `MOVE ${escapeX.toFixed(1)} ${escapeZ.toFixed(1)}`;
 					// Reset immediately so we can't get permanently stuck in this branch even if move is blocked
 					consecutiveSayCount = 0;
@@ -1046,11 +998,22 @@ async function main() {
 							agent.say(`Whoa! That's the edge of the world. I'm not going there.`);
 						} else {
 							// Safe to move
-							consecutiveSayCount = 0; // Moving resets say count
+							if (distToTarget > 0.5) {
+								consecutiveSayCount = 0; // Moving resets say count only if actually moving
+							}
 							agent.followTargetId = null; // Stop following if manual move
 							agent.moveTo(x, z);
 						}
 					}
+				} else if (action === 'WANDER') {
+					console.log('🌍 Wandering to a new location...');
+					let randomX = agent.position.x + (Math.random() - 0.5) * 30;
+					let randomZ = agent.position.z + (Math.random() - 0.5) * 30;
+					randomX = Math.max(WORLD_BOUNDS.minX, Math.min(WORLD_BOUNDS.maxX, randomX));
+					randomZ = Math.max(WORLD_BOUNDS.minZ, Math.min(WORLD_BOUNDS.maxZ, randomZ));
+					agent.moveTo(randomX, randomZ);
+					agent.followTargetId = null;
+					consecutiveSayCount = 0;
 				} else if (action.startsWith('FOLLOW')) {
 					consecutiveSayCount = 0;
 					const parts = action.split(' ');

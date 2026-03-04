@@ -115,4 +115,45 @@ export class Raycaster {
 		}
 		return false;
 	}
+
+	/**
+	 * Checks if there is a clear line of sight from the origin to the target point,
+	 * optionally ignoring a specific target ID (so it doesn't occlude itself).
+	 * Returns true if clear, false if blocked by an obstacle.
+	 */
+	static checkLineOfSight(
+		origin: Point3D,
+		target: Point3D,
+		obstacles: Obstacle[],
+		ignoreId?: string
+	): boolean {
+		const dx = target.x - origin.x;
+		// Agent's eyes are usually around y=1.5, objects might just be at y=0, we'll primarily rely on XZ for occlusion just like movement
+		const dz = target.z - origin.z;
+
+		const distSq = dx * dx + dz * dz;
+
+		// If very close, assume clear
+		if (distSq < 0.1) return true;
+
+		const dist = Math.sqrt(distSq);
+
+		// Create a raycaster pointing from origin to target
+		const direction = { x: dx / dist, y: 0, z: dz / dist }; // keeping y flat for now as physics mostly XZ
+		const ray = new Raycaster(origin, direction, dist);
+
+		// Cast against obstacles
+		const hit = ray.cast(obstacles);
+
+		if (hit) {
+			// If we hit the target itself, then LOS is clear
+			if (ignoreId && hit.id === ignoreId) {
+				return true;
+			}
+			// Otherwise it's blocked by something else
+			return false;
+		}
+
+		return true;
+	}
 }

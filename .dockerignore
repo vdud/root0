@@ -1,18 +1,29 @@
 node_modules
 .git
 .env
+.env.*
 .DS_Store
+Thumbs.db
 dist
+
+# Build / Framework caches (not needed in Docker image)
 .svelte-kit
 .vercel
 .partykit
+
+# Agent local data
 .agent/memories
 
-# Exclude Frontend & Game Server components not needed for Agent Fleet
+# Exclude Frontend & Game Server components — Agent Fleet only needs /agent & /src/lib/network
 src/routes
 src/lib/components
 src/lib/posts
 src/party
 static
+
+# Docs & editor files
 docs
 README.md
+.vscode
+.idea
+*.log
